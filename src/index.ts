@@ -34,7 +34,7 @@ import { noopLogger } from './log.ts'
 import { mdnsAdvertisement, startMdns } from './mdns.ts'
 import { UpdateChecker } from './update-check.ts'
 import { listNetworkAddresses, selectAddress } from './network.ts'
-import { startProxy, type RunningProxy } from './proxy.ts'
+import { startProxy, type ProxyStats, type RunningProxy } from './proxy.ts'
 import { buildAccessInfo, type AccessInfo } from './qrcode.ts'
 import {
   registerManagementRoutes,
@@ -70,6 +70,8 @@ export interface ManagementDeps {
   devices: DeviceRegistry
   /** Update detection (F8). */
   updates: UpdateChecker
+  /** Live WebSocket relay counters, for the health panel (P5). */
+  relay?: { stats(): ProxyStats } | undefined
 }
 
 /** The host capabilities this plugin needs, narrowed so it is testable without a real Context. */
@@ -194,6 +196,8 @@ export async function startLanGuard(host: LanGuardHost, rawConfig: unknown): Pro
     upstreamOrigin: config.upstreamOrigin,
     auth: upstreamAuth,
     gate,
+    // Read per upgrade, not captured at start: the switch is live.
+    answerHeartbeat: () => switches.answerHeartbeat(),
     ...(tls === undefined ? {} : { tls: { cert: tls.cert, key: tls.key } }),
     logger,
   })
@@ -228,6 +232,7 @@ export async function startLanGuard(host: LanGuardHost, rawConfig: unknown): Pro
     listener: { port: () => proxy.port, portFallback: () => proxy.portFallback },
     devices,
     updates,
+    relay: { stats: () => proxy.stats() },
   })
 
   if (proxy.portFallback) {
@@ -376,6 +381,9 @@ export async function apply(ctx: Context, rawConfig: unknown): Promise<void> {
       listener: deps.listener,
       devices: deps.devices,
       updates: deps.updates,
+      // Without this passthrough the health panel's relay counters silently
+      // disappear: the snapshot field is optional, so nothing fails loudly.
+      ...(deps.relay === undefined ? {} : { relay: deps.relay }),
       logger: deps.logger,
     }),
   }, rawConfig)

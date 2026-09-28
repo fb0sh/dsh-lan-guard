@@ -30,6 +30,17 @@ export interface PreferenceValues {
    * Applies to the next page load, not to the next restart.
    */
   settingsUnlock: boolean
+  /**
+   * Whether the proxy answers DSH's WebSocket Ping frames itself (default
+   * true). Applies immediately, including to sockets that are already open.
+   */
+  answerHeartbeat: boolean
+  /** Whether the served page carries the client-side socket watchdog (default true). */
+  socketWatchdog: boolean
+  /** Whether the served page carries the mobile compatibility shims (default true). */
+  mobileCompat: boolean
+  /** Whether the served page carries the narrow-screen scroll correction (default true). */
+  mobileScrollFix: boolean
   /** Whether a new device must name itself once before it is let in. */
   requirePairing: boolean
   /** Whether a new device also needs the operator's approval (F9). */
@@ -42,8 +53,9 @@ export interface PreferenceValues {
 
 /** The switch keys, in display order. */
 export const PREFERENCE_KEYS = [
-  'enabled', 'listenPort', 'listenHost', 'networkInterface', 'settingsUnlock', 'mode', 'adminPolicy',
-  'adminProtection', 'allowLoopback', 'requirePairing', 'requireApproval',
+  'enabled', 'listenPort', 'listenHost', 'networkInterface', 'settingsUnlock', 'answerHeartbeat', 'socketWatchdog',
+  'mobileCompat', 'mobileScrollFix', 'mode', 'adminPolicy', 'adminProtection', 'allowLoopback', 'requirePairing',
+  'requireApproval',
 ] as const
 
 /** One preference key. */
@@ -76,6 +88,10 @@ export function readPreferences(config: {
   listenHost: string
   networkInterface: string | null
   settingsUnlock: boolean
+  answerHeartbeat: boolean
+  socketWatchdog: boolean
+  mobileCompat: boolean
+  mobileScrollFix: boolean
   auth: {
     mode: AuthMode
     adminPolicy: AdminPolicy
@@ -91,6 +107,10 @@ export function readPreferences(config: {
     listenHost: config.listenHost,
     networkInterface: config.networkInterface ?? '',
     settingsUnlock: config.settingsUnlock,
+    answerHeartbeat: config.answerHeartbeat,
+    socketWatchdog: config.socketWatchdog,
+    mobileCompat: config.mobileCompat,
+    mobileScrollFix: config.mobileScrollFix,
     requirePairing: config.auth.requirePairing,
     requireApproval: config.auth.requireApproval,
     mode: config.auth.mode,
@@ -153,6 +173,11 @@ export function sanitizePreferencePatch(patch: unknown): Partial<PreferenceValue
     if (typeof source.settingsUnlock !== 'boolean') throw new PreferenceError('settingsUnlock must be a boolean')
     result.settingsUnlock = source.settingsUnlock
   }
+  for (const key of ['answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix'] as const) {
+    if (!Object.hasOwn(source, key)) continue
+    if (typeof source[key] !== 'boolean') throw new PreferenceError(`${key} must be a boolean`)
+    result[key] = source[key]
+  }
   if (Object.hasOwn(source, 'requireApproval')) {
     if (typeof source.requireApproval !== 'boolean') throw new PreferenceError('requireApproval must be a boolean')
     result.requireApproval = source.requireApproval
@@ -199,6 +224,10 @@ export function toSettingsPatch(values: Partial<PreferenceValues>): Record<strin
   if (values.listenHost !== undefined) patch.listenHost = values.listenHost
   if (values.networkInterface !== undefined) patch.networkInterface = values.networkInterface
   if (values.settingsUnlock !== undefined) patch.settingsUnlock = values.settingsUnlock
+  if (values.answerHeartbeat !== undefined) patch.answerHeartbeat = values.answerHeartbeat
+  if (values.socketWatchdog !== undefined) patch.socketWatchdog = values.socketWatchdog
+  if (values.mobileCompat !== undefined) patch.mobileCompat = values.mobileCompat
+  if (values.mobileScrollFix !== undefined) patch.mobileScrollFix = values.mobileScrollFix
   if (values.requirePairing !== undefined) auth.requirePairing = values.requirePairing
   if (values.requireApproval !== undefined) auth.requireApproval = values.requireApproval
   if (values.mode !== undefined) auth.mode = values.mode

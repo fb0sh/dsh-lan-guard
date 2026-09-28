@@ -82,7 +82,7 @@ Then **restart DSH once** and open **Settings → 局域网访问**. After that 
 
 ## Settings
 
-Everything lives under **Settings → 局域网访问**, in four tabs. The non-sensitive switches (`enabled`, `listenPort`, `listenHost`, `networkInterface`, `settingsUnlock`, `auth.mode`, `auth.adminPolicy`, `auth.adminProtection`, `auth.allowLoopback`, `auth.requirePairing`, `auth.requireApproval`) are editable directly; `listenPort` and `listenHost` take effect on the next DSH restart; `settingsUnlock` takes effect on the next page load; `dataDir` and `tls.*` are startup fields that need a profile-patch edit.
+Everything lives under **Settings → 局域网访问**, in four tabs. The non-sensitive switches (`enabled`, `listenPort`, `listenHost`, `networkInterface`, `settingsUnlock`, `answerHeartbeat`, `socketWatchdog`, `mobileCompat`, `auth.mode`, `auth.adminPolicy`, `auth.adminProtection`, `auth.allowLoopback`, `auth.requirePairing`, `auth.requireApproval`) are editable directly; `listenPort` and `listenHost` take effect on the next DSH restart; `settingsUnlock`, `socketWatchdog` and `mobileCompat` take effect on the next page load while `answerHeartbeat` also applies to connections that are already open; `dataDir` and `tls.*` are startup fields that need a profile-patch edit.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
@@ -96,6 +96,10 @@ Everything lives under **Settings → 局域网访问**, in four tabs. The non-s
 | Remote management rights | **this machine only** | Whether LAN devices may manage: "this machine only" is read-only; "password unlock" needs an unlock first; "not locked" adds no requirement. **Browsing directories and adding a workspace remotely needs one of the latter two.** |
 | Management needs an unlock | **on** | Turned off, a remote session that satisfies the policy may change settings directly — except under "this machine only", which never allows remote management. |
 | Official settings page on the LAN | **on** | DSH opens its official settings surface only to loopback pages, so a LAN device opening **Settings → Models** reports `settings are unavailable in this browser`. With this on, any device that passes the gate (phones included) can use those pages after a page refresh. It is a UI unlock, not a new privilege: the settings RPC is gated by the visitor gate either way, and DSH still redacts secret reads. Refresh the page to apply; no restart needed. |
+| Answer the host heartbeat | **on** | DSH pings every WebSocket every 2 s and drops it after two unanswered pings (measured: 6 s). A suspended phone cannot answer, and the **session transcript** — the only part of the UI that rides that socket — then loads incompletely or disconnects. With this on the proxy answers instead; the phone's own Pong, when it arrives, is a harmless duplicate. Applies immediately, including to open connections. |
+| Socket watchdog | **on** | Page patch: a WebSocket still in CONNECTING after 8 s is closed, and a page resumed with nothing open reloads itself once (at most three in a row per tab, backing off from 20 s). Only a page that genuinely cannot connect is affected. Applies on page refresh. |
+| Mobile compatibility shims | **on** | Page patch: fills in `AbortSignal.any`/`AbortSignal.timeout`/`Promise.withResolvers`/`Iterator` and the mobile metas. Without those APIs DSH's client throws inside its session-stream path and the UI just sits on 「载入历史…」 with no error at all. On a modern engine every branch is a no-op. Applies on page refresh. |
+| Narrow-screen scroll fix | **on** | DSH's own shell clips the conversation column on a phone (`pI_x6G_frame`, measured 844/1688) and the page cannot scroll, so content is visible but cannot be dragged. The patch only acts when narrow screen + mobile UA + page cannot scroll + a clipping overflowing layer exists; healthy pages are untouched. `?lgdiag=1` prints a layout report. Applies on page refresh. |
 | Require naming | **on** | A new device must name itself once before it appears in the device list. |
 | Require approval | off | When on, a named device still needs your **批准** before it is let in. |
 | TLS | **self-signed HTTPS** | Turning it off sends the gate password in clear; a non-loopback bind with TLS off is **refused at startup** unless you set `tls.allowInsecureLan: true`. |
@@ -114,6 +118,9 @@ The plugin reads its config from its Cordis entry. **Every key has a usable defa
     listenPort: 3081                 # DSH port + 1; auto-walks up to 10 ports when taken
     networkInterface: en0            # optional: publish on one NIC (empty = automatic)
     settingsUnlock: true             # LAN devices may use the official settings page (default on)
+    answerHeartbeat: true            # proxy answers the WebSocket heartbeat (default on)
+    socketWatchdog: true             # page-side socket watchdog (default on)
+    mobileCompat: true               # mobile compatibility shims (default on)
     dataDir: ~/.dsh/profiles/web/data/dsh-lan-guard   # optional; this is the derived default
     tls:
       mode: self-signed              # 'self-signed' (default) | 'provided' | 'off'
@@ -140,10 +147,11 @@ The plugin reads its config from its Cordis entry. **Every key has a usable defa
 
 ## Compatibility
 
-Current version: plugin **`0.3.6`**; adding a workspace from a remote device, plus the proxy defect that kept the remote console locked forever (verified on DeepSeek Harness **`0.1.7-rc.2`**).
+Current version: plugin **`0.4.0`**; mobile long-connection self-healing — the proxy answers DSH's WebSocket heartbeat, and the served page carries a socket watchdog plus mobile compatibility shims (verified on DeepSeek Harness **`0.1.7-rc.2`**).
 
 | Plugin | Verified DeepSeek Harness | What this version is |
 | --- | --- | --- |
+| **`0.4.0`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Mobile long-connection self-healing: the proxy answers DSH's WebSocket heartbeat (measured: 6 s reap without it, 20 s+ survival with it); page patches adding a socket watchdog and mobile compatibility shims; a connection health check and relay counters on the "connection" tab |
 | **`0.3.6`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Adding a workspace from a remote device: the browser half shadows the official directory flow (the local browser keeps the OS dialog, a remote device gets an in-page browser and can unlock inside it); fixes the proxy dropping the plugin's admin cookie in both directions, which made `password_unlock` meaningless remotely; adds the missing "remote management rights" control; moves the "saved" confirmation to a top-right notification; reworks status-surface colours against measured contrast; fixes the picker's crushed breadcrumb/shortcut rows |
 | **`0.3.5`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Connection-level visibility: an `http://` request to the TLS port goes from "blank page + no log" to a 301 onto `https` with a log line; a deleted device record no longer locks that browser out (revoked/blocked still refuse); the removal-page copy follows |
 | **`0.3.4`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Official settings page on the LAN: a new `settingsUnlock` switch (on by default) that injects the host-surface marker into the index; applies on page refresh; a UI unlock, not a new privilege |
@@ -158,6 +166,30 @@ Current version: plugin **`0.3.6`**; adding a workspace from a remote device, pl
 - Declared range `>=0.1.7-rc.1 <0.2.0` (`dsh.engines.dsh`); DSH versions not listed are **unverified** — verify them yourself before use.
 - Host/client interfaces this plugin uses: `webServer.register` / `webServer.tapIndex` (indexTaps), `connection.requestRejection`, `connection.authenticatedUrl`, the additive `settings.section` seat, `@deepseek-ai/schemastery`, and `profileContext` (for deriving the default data directory).
 - **Breaking default change (from `0.3.2`)**: `listenHost` now defaults to `0.0.0.0` instead of `127.0.0.1`, so one restart after install is enough; `0.3.1` and earlier default to loopback only. The gate and self-signed TLS defaults are unchanged (with no password the gate still refuses every device). See the [CHANGELOG](CHANGELOG.md).
+- **`0.4.0` verification status**: all three changes carry measurements, not just specs.
+  1. **Proxy answers the heartbeat**: a Node client against the **real DSH** measured a **6.0 s** reap after it stopped sending Pongs (`close 1006`, no Close frame); with the answerer on the same link **survived 20 s** (10 pings answered). An end-to-end spec reproduces the pair against a DSH-shaped upstream (40 ms pings, destroy after two misses): **reaps without the answerer, survives with it**.
+  2. **Page patches**: the injected scripts are **executed** in the suite against a fake environment and clock — "a socket stuck in CONNECTING is closed after 8 s", "never reloads while one socket is OPEN", "never reloads a page that created no socket", "reloads once after a resume with nothing open, then backs off within the cooldown and cap", "never reloads while hidden".
+  3. **Browser verification** (BrowserSkill, Chrome 154, through a temporary loopback forward that still traverses the whole plugin path): `/api/remote.mux` handshake 3 ms; the `session/follow` snapshot arrives in 43–110 ms as a single 2.1 MB frame; 310 frames over 12 s with no interruption; and with the page's main thread frozen for 12 s a connection without the answerer received `close 1006`.
+  The suite is green at **349** specs (330 in 0.3.6). The real-DSH install verification follows the release (this machine runs the installed 0.3.6, so the code takes effect after a reinstall plus a DSH restart).
+
+### Why a phone's session socket dies (measured 2026-09-28)
+
+The session transcript — the 「载入历史…」 part of the UI — **rides the WebSocket only**; the session list, the goal chip and the statistics arrive over HTTP, which is why the failure looks like "everything is there except the conversation". Three facts define it:
+
+| Fact | Source |
+| --- | --- |
+| The host pings every 2 s and drops a socket after two unanswered pings | `websocketHeartbeatIntervalMs: 2000`, `MAX_MISSED_HEARTBEATS: 2` |
+| A client that stops sending Pongs is dropped after **6.0 s** (`close 1006`, no Close frame) | measured three ways: direct on 3081, through a forward, and with a frozen browser main thread |
+| A phone that switches away or locks its screen cannot answer | iOS suspends the page; WebKit additionally has a case where `new WebSocket()` stays in CONNECTING forever after a resume while HTTP keeps working |
+
+Three layers ship in this release, all on by default and each individually switchable:
+
+1. **`answerHeartbeat`** — while relaying, the proxy reads the upstream→browser control frames and answers a Ping with a masked Pong on the client's behalf. RFC 6455 allows an unsolicited Pong and the host only resets its counter on "a Pong arrived", so the phone's own duplicate is harmless. This is the only layer that stops the host from reaping a suspended phone.
+2. **`socketWatchdog`** — the page-side half: close a socket that is stuck in CONNECTING, and reload once when a resume leaves nothing open.
+3. **`mobileCompat`** — `AbortSignal.any`/`timeout`, `Promise.withResolvers`, `Iterator` and the mobile metas. DSH's client calls `AbortSignal.any` on its session-stream path, and `Session.doOpen` re-throws non-transport errors, so a missing API shows up as a permanent 「载入历史…」 with no error text.
+
+**Settings → 局域网访问 → 连接与证书 → 手机连接与自愈** carries a connection health check: it inspects which APIs this browser lacks, which patches the page received, runs a real WebSocket handshake against the current origin, and shows the proxy-side counters (open connections, upgrades, refusals, answered heartbeats) plus the last connection's duration, bytes and whether it died abnormally.
+
 - **`0.3.6` verification status**: the change spans the host side (a new directory-listing route and cookie relaying) and the client side (the directory browser, the settings controls, the notification and the colour rework). The suite is green at **330** specs (+57); all three commits were verified in isolation in their own worktrees (278 / 304 / 330 each passing); it was falsified (reverting the cookie relay, the no-shrink rule, or the hover-tint surface each fails its specs); and contrast was computed from DSH's real token values, 10/10 passing in light and dark. The real-DSH install verification follows the release.
 - **`0.3.5` verification status**: the changes touch only the proxy's connection-level handling and the gate's verdict; no host/client interface changed; the suite is green at **273** specs (+10) and was falsified (reverting a fix fails its specs); the real-DSH install verification follows the release.
 - **`0.3.4` verification status**: the change adds one host-side switch, one index injection and a switch on the plugin's own settings page (`webServer.tapIndex` is a declared host interface); the suite is green at **263** specs; the injected script was exercised in a real Chrome over a non-loopback address in three states; the real-DSH install verification follows the release.
@@ -168,6 +200,17 @@ The official UI is reused with zero modifications and adapts on a phone viewport
 <p align="center">
   <img src="./assets/mobile.png" width="30%" alt="The official DSH UI at a 390px phone viewport: the plugin only proxies, the interface is the official one">
 </p>
+
+### Why a phone "cannot see all messages" / cannot scroll (measured 2026-09-28)
+
+**Symptom**: on a phone the newest content is partly visible but the column cannot be dragged, while the fixed goal / quick-reply / composer floats cover the text.
+
+**Root cause (measured on the device viewport)**: on narrow screens DSH's own shell keeps the conversation in `pI_x6G_frame` with `overflow:hidden` while the content is taller — measured `clientHeight=844 / scrollHeight=1688` — and the page as a whole cannot scroll either (`pageScrolls=false`). The content is clipped, so it is visible but not draggable. The same viewport scrolls fine in desktop Chrome, so this is an iOS/narrow-screen layout difference, **not the reverse proxy** (all DOM/CSS comes from the official shell and the installed plugins).
+
+**Fix (`mobileScrollFix`, on by default)**: the injected script only acts when narrow screen AND mobile UA AND the page cannot scroll AND it actually finds a layer clipping overflowing content; it then makes exactly those layers touch-scrollable (`overflow-y:auto`, `-webkit-overflow-scrolling:touch`, `touch-action:pan-y`). Healthy pages are never touched.
+
+**Self-check**: append `?lgdiag=1` to the page URL for an on-screen report (`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / patched`). That report is exactly the data that located this bug.
+
 
 ## Security boundary
 

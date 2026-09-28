@@ -324,3 +324,35 @@ describe('settingsUnlock switch (2026-09-26)', () => {
     expect(() => sanitizePreferencePatch({ settingsUnlock: 0 })).toThrow(/boolean/)
   })
 })
+
+describe('mobile resilience switches (2026-09-28)', () => {
+  const KEYS = ['answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix'] as const
+
+  it('all default ON: the failure they prevent is invisible until it happens', () => {
+    const config = parseConfig({ dataDir: '/tmp/x' })
+    for (const key of KEYS) expect(config[key]).toBe(true)
+  })
+
+  it('are volatile, so a toggle applies without a restart', async () => {
+    const { Config, liveSwitches, parseConfig: parse } = await import('../src/config.ts')
+    const resolved = Config({ dataDir: '/tmp/x', answerHeartbeat: false, socketWatchdog: false, mobileCompat: false, mobileScrollFix: false } as never) as unknown
+    for (const key of KEYS) expect((resolved as Record<string, unknown>)[key]).toBeTypeOf('object')
+    const parsed = parse(resolved)
+    const switches = liveSwitches(resolved, parsed)
+    for (const key of KEYS) {
+      expect(parsed[key]).toBe(false)
+      expect(switches[key]()).toBe(false)
+    }
+  })
+
+  it('accept booleans from the settings page and refuse anything else', async () => {
+    const { sanitizePreferencePatch, toSettingsPatch } = await import('../src/store/preferences.ts')
+    for (const key of KEYS) {
+      expect(sanitizePreferencePatch({ [key]: false })).toEqual({ [key]: false })
+      expect(toSettingsPatch({ [key]: false })).toEqual({ [key]: false })
+      expect(() => sanitizePreferencePatch({ [key]: 'off' })).toThrow(/boolean/)
+    }
+    // The whitelist is the whole point: an unknown key never reaches the writer.
+    expect(sanitizePreferencePatch({ answerHeartbeat: true, somethingElse: true })).toEqual({ answerHeartbeat: true })
+  })
+})

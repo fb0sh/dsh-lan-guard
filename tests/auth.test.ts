@@ -56,6 +56,10 @@ function configWith(overrides: Partial<LanGuardConfigShape['auth']> = {}): LanGu
     networkInterface: null,
     dataDir: null,
     settingsUnlock: true,
+    answerHeartbeat: true,
+    socketWatchdog: true,
+    mobileCompat: true,
+    mobileScrollFix: true,
     auth: {
       enabled: true,
       mode: 'token_and_password',

@@ -82,7 +82,7 @@ dsh plugin --profile web add "link:$(pwd)"
 
 ## 设置
 
-设置项集中在 **设置 → 局域网访问** 的四个 tab 里。非敏感开关（`enabled`、`listenPort`、`listenHost`、`networkInterface`、`settingsUnlock`、`auth.mode`、`auth.adminPolicy`、`auth.adminProtection`、`auth.allowLoopback`、`auth.requirePairing`、`auth.requireApproval`）可直接改；`listenPort` 与 `listenHost` 需重启 dsh 生效；`settingsUnlock` 刷新页面即可生效；`dataDir` 与 `tls.*` 属启动期字段，需在 profile patch 里改。
+设置项集中在 **设置 → 局域网访问** 的四个 tab 里。非敏感开关（`enabled`、`listenPort`、`listenHost`、`networkInterface`、`settingsUnlock`、`answerHeartbeat`、`socketWatchdog`、`mobileCompat`、`auth.mode`、`auth.adminPolicy`、`auth.adminProtection`、`auth.allowLoopback`、`auth.requirePairing`、`auth.requireApproval`）可直接改；`listenPort` 与 `listenHost` 需重启 dsh 生效；`settingsUnlock` / `socketWatchdog` / `mobileCompat` / `mobileScrollFix` 刷新页面即可生效，`answerHeartbeat` 立即对**已打开**的连接生效；`dataDir` 与 `tls.*` 属启动期字段，需在 profile patch 里改。
 
 | 设置项 | 默认 | 作用 |
 | --- | --- | --- |
@@ -96,6 +96,10 @@ dsh plugin --profile web add "link:$(pwd)"
 | 远程设备管理权限 | **仅本机** | 决定局域网设备能否管理：「仅本机」只读；「密码解锁」需先解锁；「不锁定」不额外要求。**远程浏览目录并添加工作区需要后两者之一**。 |
 | 管理操作需要先解锁 | **开** | 关闭后，符合策略的远程会话可直接修改设置（`local_only` 除外，它永远只允许本机）。 |
 | 局域网设备可用官方设置页 | **开** | DSH 官方设置面默认只对回环页面开放，局域网设备打开「设置 → 模型」会提示 `settings are unavailable in this browser`。开启后，通过门禁的设备（含手机）刷新页面即可使用官方设置页；这是界面解锁，不是新增权限——设置接口本来就只由门禁把关，读取密钥仍由 DSH 脱敏。刷新页面生效，无需重启。 |
+| 代理代答心跳 | **开** | DSH 每 2 秒给每条 WebSocket 发心跳，连续两次没被回应就断开（实测 6 秒）。手机锁屏/切走时页面被系统挂起、回不了心跳，于是只走 WebSocket 的**会话记录**就会「载入不全、甚至断开」。开启后由代理替手机回心跳，手机自己回的那次是重复包，无副作用。立即生效（含已打开的连接）。 |
+| 断线看门狗 | **开** | 页面补丁：卡在「连接中」超过 8 秒的 WebSocket 会被关掉；从后台回来 10 秒后仍一条都没连上时自动重载一次（每标签最多连续 3 次，冷却 20 秒起）。只对真的连不上的页面生效。刷新页面生效。 |
+| 移动端兼容垫片 | **开** | 页面补丁：补 `AbortSignal.any`/`AbortSignal.timeout`/`Promise.withResolvers`/`Iterator` 与移动端 meta。缺这些 API 时 DSH 客户端在会话流里抛错，界面只会一直显示「载入历史…」且没有报错。现代浏览器上这些分支不生效。刷新页面生效。 |
+| 手机滚动矫正（窄屏） | **开** | 手机端 DSH 外壳在窄屏下把对话列裁在 `overflow:hidden` 的层里（实测 844/1688），整页也不可滚 → 内容可见但**滑不动**。开启后只在「窄屏 + 移动端 + 整页不可滚 + 找到被裁剪溢出的层」四条同时成立时，把那几层改成可触摸滚动；正常页面不碰。页面加 `?lgdiag=1` 可看布局诊断。刷新页面生效。 |
 | 新设备需要命名确认 | **开** | 新设备首次通过门禁时要自己命名一次，之后才出现在设备列表里。 |
 | 新设备需要管理员批准 | 关 | 开启后，命名完还要你在设备列表点「批准」才能进入。 |
 | TLS | **自签 HTTPS** | 关闭会明文传输门禁密码；非回环 + 关闭 TLS 必须显式设置 `tls.allowInsecureLan: true`，否则**拒绝启动**。 |
@@ -114,6 +118,9 @@ dsh plugin --profile web add "link:$(pwd)"
     listenPort: 3081                 # DSH 端口 + 1；被占用时自动顺延
     networkInterface: en0            # 可选：只在一个网卡上公布（留空 = 自动）
     settingsUnlock: true             # 局域网设备可用官方设置页（默认开；关闭恢复 DSH 默认）
+    answerHeartbeat: true            # 代理代答 WebSocket 心跳（默认开；手机挂起时不被宿主回收）
+    socketWatchdog: true             # 页面断线看门狗（默认开）
+    mobileCompat: true               # 移动端兼容垫片（默认开）
     dataDir: ~/.dsh/profiles/web/data/dsh-lan-guard   # 可选；缺省即用这个推导路径
     tls:
       mode: self-signed              # 'self-signed'（默认）| 'provided' | 'off'
@@ -144,6 +151,7 @@ dsh plugin --profile web add "link:$(pwd)"
 
 | 插件 | 已验证的 DeepSeek Harness | 这个版本是什么 |
 | --- | --- | --- |
+| **`0.4.0`** | **`0.1.7-rc.2`**、`0.1.7-rc.1` | 手机长连接自愈：代理代答 DSH 的 WebSocket 心跳（实测把「停回心跳 6 秒被切断」变成「20 秒以上存活」）；页面补丁加入断线看门狗与移动端兼容垫片；「连接与证书」新增连接体检与代理侧计数 |
 | **`0.3.6`** | **`0.1.7-rc.2`**、`0.1.7-rc.1` | 远程也能添加工作区：浏览器侧遮蔽官方目录流程（本机仍走系统对话框，远程改用页面内目录浏览器，可在弹层内解锁）；修掉代理双向丢弃插件管理 cookie 导致 `password_unlock` 对远程形同虚设；补上一直缺失的「远程设备管理权限」控件；「已保存」改为右上角提示；状态表面配色按实测重做；弹层两行被压扁重叠 |
 | **`0.3.5`** | **`0.1.7-rc.2`**、`0.1.7-rc.1` | 连接层可见性：`http://` 访问 TLS 端口由「空白页 + 无日志」改为 301 跳 `https` 并记日志；删除设备记录后旧 cookie 不再把浏览器锁死（吊销/拉黑仍拒绝）；移除页文案同步修正 |
 | **`0.3.4`** | **`0.1.7-rc.2`**、`0.1.7-rc.1` | 局域网设备可用官方设置页：新增默认开启的 `settingsUnlock` 开关（index 注入宿主界面标记，刷新页面生效；界面解锁而非新增权限） |
@@ -158,6 +166,30 @@ dsh plugin --profile web add "link:$(pwd)"
 - 声明范围 `>=0.1.7-rc.1 <0.2.0`（`dsh.engines.dsh`）；未列入的 DSH 版本属**未验证**，请自行验证后再使用。
 - 本插件用到的宿主/客户端接口：`webServer.register` / `webServer.tapIndex`（indexTaps）、`connection.requestRejection`、`connection.authenticatedUrl`、追加型 `settings.section` seat、`@deepseek-ai/schemastery`，以及 `profileContext`（用于推导默认数据目录）。
 - **破坏性默认值变更（`0.3.2` 起）**：`listenHost` 默认由 `127.0.0.1` 改为 `0.0.0.0`，装完重启一次即可用；`0.3.1` 及更早默认仅回环。门禁与自签 TLS 的默认值未变（未设密码仍拒绝所有设备）。详见 [CHANGELOG](CHANGELOG.md)。
+- **`0.4.0` 的验证状态**：三处改动都做了实测，不只跑用例。
+  1. **代理代答心跳**：先用 Node 客户端对**真实 DSH** 测得「停止回 Pong 后 **6.0 秒**被切断，`close 1006`（无 Close 帧）」；再加上代答后同一条链路 **20 秒仍存活**（收到 10 次 Ping）。仓库里有一条端到端用例复现同一对行为（上游按 40ms 心跳、漏 2 次即 destroy）：**关掉代答必被回收、打开代答连接存活**。
+  2. **页面补丁**：注入的脚本在测试里**被执行**（假环境 + 假时钟），断言「卡在 CONNECTING 8 秒被关掉」「有一条 OPEN 就不重载」「从未建过 socket 不重载」「后台回来无 OPEN 才重载一次、并按冷却与上限退避」「隐藏状态不重载」。
+  3. **浏览器实测**（BrowserSkill，Chrome 154，经临时回环转发走完整插件链路）：`/api/remote.mux` 握手 3ms、`session/follow` 首帧 2.1MB 单帧 43–110ms、12 秒 310 帧无中断；同一页面把主线程冻结 12 秒时，无代答的连接收到 `close 1006`。
+  测试套件 **349 项**全绿（0.3.6 为 330）。真实 DSH 上的装机验证在发布后进行（本机运行的是已安装的 0.3.6，需重装 + 重启 dsh 才生效）。
+
+### 手机长连接为什么会断（实测，2026-09-28）
+
+会话记录（就是界面上的「载入历史…」那一段）**只走 WebSocket**：会话列表、目标条、统计数字都来自 HTTP，所以 WS 一断就会呈现「界面都在、对话区空白」的形状。三个事实决定了这个失效模式：
+
+| 事实 | 实测/来源 |
+| --- | --- |
+| 宿主每 2 秒 Ping 一次，连续两次没被回应才回收 | `websocketHeartbeatIntervalMs: 2000`、`MAX_MISSED_HEARTBEATS: 2` |
+| 停止回 Pong 后 **6.0 秒**被切断（`close 1006`，无 Close 帧），三处独立复现 | 直连 3081、经转发、浏览器冻结主线程 |
+| 手机切走/锁屏时页面被系统挂起，回不了心跳 | iOS 行为；WebKit 另有「后台恢复后 `new WebSocket()` 永久卡 CONNECTING 而 HTTP 正常」的已知问题 |
+
+因此本版本提供三层兜底，默认全开、可逐项关闭：
+
+1. **代理代答心跳（`answerHeartbeat`）**：代理在中转时读取上游→浏览器方向的 WS 控制帧，遇到 Ping 立刻以客户端身份回一个掩码 Pong。RFC 6455 允许未经请求的 Pong，宿主只按「收到过 Pong」重置计数，所以手机自己回的重复包无害。这是唯一能阻止宿主回收挂起手机连接的一层。
+2. **断线看门狗（`socketWatchdog`）**：页面侧兜住 WebKit 的「卡 CONNECTING」——超时关掉卡住的 socket，从后台回来仍连不上时限流重载一次。
+3. **移动端兼容垫片（`mobileCompat`）**：补 `AbortSignal.any`/`timeout`、`Promise.withResolvers`、`Iterator` 与移动端 meta。DSH 客户端在会话流里直接调用 `AbortSignal.any`，而 `Session.doOpen` 会把**非传输类异常原样抛出**——缺 API 时的表现就是「永久载入历史…、连报错都没有」。
+
+「连接与证书 → 手机连接与自愈」里有一个**连接体检**：它在这个浏览器里检查缺哪些 API、页面拿到了哪些补丁，并对当前地址做一次真实 WebSocket 握手，同时显示代理侧的计数（在活连接 / 累计升级 / 被拒 / 代答心跳次数）与最近一条连接的时长、上下行字节、是否异常断开。
+
 - **`0.3.6` 的验证状态**：改动包含宿主侧（新增目录列举路由与 cookie 中转）与客户端（目录浏览器、设置页控件、提示层与配色）。测试套件 **330 项**全绿（+57）；三个提交在独立 worktree 里逐提交验证（278 / 304 / 330 各自通过）；并做过反证（回退 cookie 中转、固定行不收缩、hover 染当背景，各自让对应用例失败）；配色对比度按 DSH 真实 token 逐项计算，浅色/深色 10/10 通过。真实 DSH 上的装机验证在发布后进行。
 - **`0.3.5` 的验证状态**：改动只在代理的连接层处理与门禁判定，未改动任何宿主/客户端接口；测试套件 **273 项**全绿（+10），并做过反证（回退修复后对应用例失败）；真实 DSH 上的装机验证在发布后进行。
 - **`0.3.4` 的验证状态**：改动只新增一个宿主侧开关、一行 index 注入与插件自己的设置页开关（`webServer.tapIndex` 是已声明的宿主接口）；测试套件 **263 项**全绿；注入脚本已在真实 Chrome + 非回环地址实测三种状态；真实 DSH 上的装机验证在发布后进行。
@@ -168,6 +200,16 @@ dsh plugin --profile web add "link:$(pwd)"
 <p align="center">
   <img src="./assets/mobile.png" width="30%" alt="390px 手机视口下的官方 DSH 界面：插件只做代理，界面由官方原样提供">
 </p>
+
+### 手机上为什么「看不到全部消息」/ 滑不动（实测，2026-09-28）
+
+**症状**：手机上打开会话，最新内容能看到一部分，但**手指滑不动**；底部固定的「目标条 / 快捷回复 / 输入框」压住正文，右侧滚动条停在中途。
+
+**根因（真机视口实测）**：DSH 官方外壳在**窄屏**下的根层 `pI_x6G_frame` 是 `overflow:hidden`，而内容高于它——实测 `clientHeight=844 / scrollHeight=1688`，同时**整页也不可滚**（`pageScrolls=false`）。内容被裁在容器里，所以"看得见、滑不动"。同一视口在桌面 Chrome 上正常，因此这是 iOS/窄屏的布局差异，**与反向代理无关**（DOM/CSS 全部来自官方 UI 与已装插件）。
+
+**修复（`mobileScrollFix`，默认开）**：注入脚本**只在四条同时成立时**才动手——窄屏（≤1023px）、移动端 UA、**整页不可滚**、且**确实找到被裁剪且内容溢出的层**；然后只把那几层改成可触摸滚动（`overflow-y:auto`、`-webkit-overflow-scrolling:touch`、`touch-action:pan-y`）。能正常滚动的页面一律不碰。
+
+**自检**：在页面地址后加 `?lgdiag=1`，顶部会出现一屏诊断（`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / 是否已修`）。这一屏就是本次定位所用的数据，以后复现同类问题不必连 Mac 调试。
 
 ## 安全边界
 

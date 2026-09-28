@@ -75,6 +75,10 @@ interface ConfigSnapshot {
     listenHost: string
     networkInterface: string
     settingsUnlock: boolean
+    answerHeartbeat: boolean
+    socketWatchdog: boolean
+    mobileCompat: boolean
+    mobileScrollFix: boolean
     mode: string
     adminPolicy: string
     adminProtection: boolean
@@ -116,6 +120,23 @@ interface ConfigSnapshot {
     revoked: boolean
   }[]
   pendingCount: number
+  /** WebSocket relay counters (P5); absent on hosts that predate the panel. */
+  connection?: {
+    wsActive: number
+    wsUpgrades: number
+    wsRefused: number
+    heartbeatAnswered: number
+    recent: {
+      atMs: number
+      target: string
+      upgraded: boolean
+      status?: number
+      durationMs: number
+      bytesToVisitor: number
+      bytesToUpstream: number
+      sawCloseFrame: boolean
+    }[]
+  }
   access: {
     port: number
     portFallbackFrom: number | null
@@ -556,6 +577,8 @@ function SettingsSection(): ReactElement {
   const [portCheck, setPortCheck] = useState<string | null>(null)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [doctor, setDoctor] = useState<string[] | null>(null)
+  const [doctorBusy, setDoctorBusy] = useState(false)
 
   // A transient confirmation: a permanent bar costs a whole row of the page
   // for information that is stale a second later (user feedback 2026-09-24).
@@ -692,6 +715,82 @@ function SettingsSection(): ReactElement {
       setPortCheck('检查失败')
     }
   }, [])
+
+  /**
+   * Run the on-page half of the connection health check (P5).
+   *
+   * Everything here is measured in the VISITOR's own browser, which is the only
+   * place the interesting facts live: which APIs this engine lacks (that is what
+   * leaves a session stuck on 「载入历史…」 with no error), whether the injected
+   * patches are present, and how long a real WebSocket handshake to this origin
+   * takes. The host's own counters come from the snapshot, not from here.
+   */
+  const runDoctor = useCallback(async (): Promise<void> => {
+    setDoctorBusy(true)
+    const lines: string[] = []
+    try {
+      const patches = (globalThis as { __DSH_LAN_GUARD__?: Record<string, unknown> }).__DSH_LAN_GUARD__ ?? {}
+      lines.push(`页面补丁：官方设置页解锁 ${patches.settingsUnlock === true ? '✓' : '—'}`
+        + ` · 移动端兼容垫片 ${patches.mobileCompat === true ? '✓' : '—'}`
+        + ` · 断线看门狗 ${patches.socketWatchdog === true ? '✓' : '—'}`)
+      const missing: string[] = []
+      if (typeof AbortSignal.any !== 'function') missing.push('AbortSignal.any')
+      if (typeof AbortSignal.timeout !== 'function') missing.push('AbortSignal.timeout')
+      if (typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers !== 'function') {
+        missing.push('Promise.withResolvers')
+      }
+      if (typeof (globalThis as { Iterator?: unknown }).Iterator === 'undefined') missing.push('Iterator')
+      lines.push(missing.length === 0
+        ? '浏览器引擎能力：✓ 会话流需要的 API 齐全'
+        : `浏览器引擎能力：缺 ${missing.join('、')}（垫片未生效时，会话记录会停在「载入历史…」且没有报错）`)
+      lines.push(`页面来源：${location.origin}${location.origin.startsWith('https://127.0.0.1') || location.origin.startsWith('http://127.0.0.1') ? '（本机回环）' : '（经局域网入口）'}`)
+      const agent = navigator.userAgent
+      lines.push(`浏览器：${agent.slice(0, 120)}`)
+
+      const started = Date.now()
+      const outcome = await new Promise<string>((resolve) => {
+        let socket: WebSocket
+        try {
+          socket = new WebSocket(`${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}/api/remote.mux`)
+        } catch (failure) {
+          resolve(`✗ 无法创建 WebSocket：${(failure as Error).message}`)
+          return
+        }
+        const timer = setTimeout(() => {
+          try { socket.close() } catch { /* already gone */ }
+          resolve('✗ 12 秒内没有完成握手（WebKit 后台恢复后卡在 CONNECTING 的典型形状）')
+        }, 12_000)
+        socket.addEventListener('open', () => {
+          clearTimeout(timer)
+          resolve(`✓ 握手成功，用时 ${String(Date.now() - started)} ms`)
+          try { socket.close() } catch { /* already gone */ }
+        })
+        socket.addEventListener('error', () => {
+          clearTimeout(timer)
+          resolve('✗ WebSocket 握手失败（门禁拒绝或证书不受信任）')
+        })
+        socket.addEventListener('close', (event) => {
+          if (event.code === 1006) return // the abnormal path is already reported by open/error
+        })
+      })
+      lines.push(`会话 WebSocket（${location.host}）：${outcome}`)
+      const relay = snapshot?.connection
+      if (relay !== undefined) {
+        lines.push(`代理侧：在活连接 ${String(relay.wsActive)} · 累计升级 ${String(relay.wsUpgrades)}`
+          + ` · 被拒 ${String(relay.wsRefused)} · 代答心跳 ${String(relay.heartbeatAnswered)} 次`)
+        const last = relay.recent[0]
+        if (last !== undefined) {
+          lines.push(`最近一条：${last.upgraded ? '已升级' : `被拒 ${String(last.status ?? '?')}`}`
+            + ` · 存活 ${String(Math.round(last.durationMs / 1000))}s`
+            + ` · 上行 ${String(Math.round(last.bytesToUpstream / 1024))}KB / 下行 ${String(Math.round(last.bytesToVisitor / 1024))}KB`
+            + `${last.upgraded && !last.sawCloseFrame ? ' · 异常断开（无 Close 帧）' : ''}`)
+        }
+      }
+      setDoctor(lines)
+    } finally {
+      setDoctorBusy(false)
+    }
+  }, [snapshot])
 
   /** Submit the admin unlock, keeping the button an ENABLED primary action. */
   const submitUnlock = async (): Promise<void> => {
@@ -1083,6 +1182,102 @@ function SettingsSection(): ReactElement {
 
   // ---- tab: connection ---------------------------------------------------
   const connectionTab = createElement('div', { className: 'lg-tabbody' }, locked ? [lockCard] : [
+    // Mobile resilience (2026-09-28). Both halves are measured facts, not
+    // guesses: DSH reaps a mux socket 6 s after its Pings stop being answered,
+    // and a phone that leaves Safari cannot answer them; and WebKit can leave a
+    // resumed page with a WebSocket that never opens again.
+    createElement(Card, {
+      key: 'mobile',
+      title: '手机连接与自愈',
+      subtitle: '长连接为什么会断，以及断了以后怎么恢复',
+      children: [
+        createElement('p', { className: 'lg-hint', key: 'why' },
+          '会话记录（「载入历史…」那一段）只走 WebSocket：DSH 每 2 秒发一次心跳，'
+          + '连续两次没被回应就断开——实测 6 秒。手机锁屏或切走时页面被系统挂起，回不了心跳，'
+          + '于是会话就会「载入不全、甚至断开」。下面三项默认开启，逐项都可以关。'),
+        createElement('div', { className: 'lg-field', key: 'heartbeat' }, [
+          createElement('div', { className: 'lg-toggle', key: 't' }, [
+            createElement('span', { key: 'l' }, '代理代答心跳'),
+            createElement('button', {
+              key: 's',
+              type: 'button',
+              className: 'lg-switch',
+              'aria-checked': preferences.answerHeartbeat,
+              disabled: busy,
+              onClick: () => void write({ preferences: { answerHeartbeat: !preferences.answerHeartbeat } }),
+            }, createElement('span', null)),
+          ]),
+          createElement('p', { className: 'lg-hint', key: 'h' },
+            '手机挂起期间由代理替它回心跳，宿主就不再回收这条连接（已实测：停回心跳 6 秒被切断 vs 代答后 20 秒以上存活）。'
+            + '手机自己回的心跳到达时是重复包，没有副作用。'),
+        ]),
+        createElement('div', { className: 'lg-field', key: 'watchdog' }, [
+          createElement('div', { className: 'lg-toggle', key: 't' }, [
+            createElement('span', { key: 'l' }, '断线看门狗（页面补丁）'),
+            createElement('button', {
+              key: 's',
+              type: 'button',
+              className: 'lg-switch',
+              'aria-checked': preferences.socketWatchdog,
+              disabled: busy,
+              onClick: () => void write({ preferences: { socketWatchdog: !preferences.socketWatchdog } }),
+            }, createElement('span', null)),
+          ]),
+          createElement('p', { className: 'lg-hint', key: 'h' },
+            '卡在「连接中」超过 8 秒的 WebSocket 会被关掉；从后台回来 10 秒后仍然一条都没连上时，'
+            + '页面自动重载一次（每标签最多连续 3 次，冷却 20 秒起）。只影响真的连不上的页面。'),
+        ]),
+        createElement('div', { className: 'lg-field', key: 'compat' }, [
+          createElement('div', { className: 'lg-toggle', key: 't' }, [
+            createElement('span', { key: 'l' }, '移动端兼容垫片'),
+            createElement('button', {
+              key: 's',
+              type: 'button',
+              className: 'lg-switch',
+              'aria-checked': preferences.mobileCompat,
+              disabled: busy,
+              onClick: () => void write({ preferences: { mobileCompat: !preferences.mobileCompat } }),
+            }, createElement('span', null)),
+          ]),
+          createElement('p', { className: 'lg-hint', key: 'h' },
+            '为老引擎补 AbortSignal.any / AbortSignal.timeout / Promise.withResolvers / Iterator，'
+            + '并补上移动端 meta。缺这些 API 时 DSH 客户端会在会话流里抛错，'
+            + '而界面上只会一直显示「载入历史…」、连报错都没有。现代浏览器上这些分支不生效。'),
+        ]),
+        createElement('div', { className: 'lg-field', key: 'scrollfix' }, [
+          createElement('div', { className: 'lg-toggle', key: 't' }, [
+            createElement('span', { key: 'l' }, '手机滚动矫正（窄屏）'),
+            createElement('button', {
+              key: 's',
+              type: 'button',
+              className: 'lg-switch',
+              'aria-checked': preferences.mobileScrollFix,
+              disabled: busy,
+              onClick: () => void write({ preferences: { mobileScrollFix: !preferences.mobileScrollFix } }),
+            }, createElement('span', null)),
+          ]),
+          createElement('p', { className: 'lg-hint', key: 'h' },
+            '手机上 DSH 自己的外壳会把对话列压在固定的输入框/目标条/快捷回复浮层后面，导致内容可见但**滑不动**'
+            + '（同一视口在桌面 Chrome 里能滚，属 iOS 布局/触摸差异）。开启后，页面会在「整页不可滚 + 发现被裁剪的层」时'
+            + '把那几层改成可触摸滚动；能正常滚动的页面一律不碰。打开页面时加 ?lgdiag=1 会显示一屏布局诊断。'),
+        ]),
+        createElement('div', { className: 'lg-row', key: 'doctor' }, [
+          createElement('button', {
+            key: 'b',
+            type: 'button',
+            className: 'lg-btn',
+            disabled: doctorBusy,
+            onClick: () => void runDoctor(),
+          }, doctorBusy ? '体检中…' : '运行连接体检'),
+        ]),
+        createElement('p', { className: 'lg-hint', key: 'doctor-hint' },
+          '体检在这个浏览器里跑：检查引擎缺哪些 API、页面拿到了哪些补丁，并对本页地址做一次真实的 WebSocket 握手。'),
+        doctor === null
+          ? null
+          : createElement('div', { className: 'lg-mono lg-mono-sm', key: 'doctor-out' },
+            doctor.map((line, index) => createElement('div', { key: `l${String(index)}` }, line))),
+      ],
+    }),
     createElement(Card, {
       key: 'connection',
       title: '连接与证书',

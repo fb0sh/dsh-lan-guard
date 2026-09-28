@@ -10,6 +10,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { apply, startLanGuard, type LanGuardHost, type LanGuardRuntime } from '../src/index.ts'
@@ -191,8 +193,69 @@ describe('apply', () => {
     await expect(requestTo(port, { path: '/', headers: { connection: 'close' } })).rejects.toThrow()
   })
 
-  it('derives dataDir from profileContext so a zero-config install works', async () => {
-    // The reported failure: an install whose profile patch has no entry for
+  it('passes the live relay counters through to the management snapshot', async () => {
+    // The snapshot field is optional, so a missing passthrough degrades
+    // SILENTLY: the health panel would simply never show a counter. This test
+    // drives the real `apply` wiring and reads the JSON the page fetches
+    // (regression: the first 0.4.0 build dropped `deps.relay` here).
+    fake = await startFakeDsh()
+    const port = await freePort()
+    const handlers = new Map<string, (req: IncomingMessage, res: ServerResponse) => void | Promise<void>>()
+    const ctx = {
+      logger: () => silentLogger(),
+      connection: { authenticatedUrl: fake.authenticatedUrl, requestRejection: () => undefined },
+      webServer: {
+        port: 3080,
+        register: (route: { path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }) => {
+          handlers.set(route.path, route.handler)
+          return () => {}
+        },
+      },
+      effect: () => {},
+    } as unknown as Context
+
+    await apply(ctx, {
+      dataDir: await tmpDataDir(),
+      listenHost: '127.0.0.1',
+      listenPort: port,
+      upstreamOrigin: fake.origin,
+      tls: { mode: 'off' },
+      auth: { allowLoopback: true },
+    })
+
+    const server = createServer((req, res) => {
+      const path = new URL(req.url ?? '/', 'http://x.invalid').pathname
+      const handler = handlers.get(path)
+      if (handler === undefined) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      void handler(req, res)
+    })
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    try {
+      const response = await requestTo((server.address() as AddressInfo).port, {
+        path: '/plugins/dsh-lan-guard/config',
+      })
+      const body = JSON.parse(response.body.toString()) as {
+        preferences: Record<string, unknown>
+        connection?: { heartbeatAnswered: number; wsUpgrades: number; recent: unknown[] }
+      }
+      expect(body.preferences.answerHeartbeat).toBe(true)
+      expect(body.preferences.socketWatchdog).toBe(true)
+      expect(body.preferences.mobileCompat).toBe(true)
+      expect(body.connection).toBeDefined()
+      expect(body.connection?.heartbeatAnswered).toBe(0)
+      expect(body.connection?.wsUpgrades).toBe(0)
+      expect(body.connection?.recent).toEqual([])
+    } finally {
+      server.closeAllConnections?.()
+      await new Promise<void>((resolve) => { server.close(() => resolve()) })
+    }
+  })
+
+  it('derives dataDir from profileContext so a zero-config install works', async () => {    // The reported failure: an install whose profile patch has no entry for
     // this plugin at all. `profileContext` is the only thing DSH supplies, and
     // the management routes must still come up.
     fake = await startFakeDsh()
@@ -268,7 +331,44 @@ describe('apply', () => {
     expect(tapDisposed).toBe(1)
   })
 
-  it('leaves the index untouched when the unlock switch is off', async () => {
+  it('leaves the index untouched only when every index patch is switched off', async () => {
+    fake = await startFakeDsh()
+    const port = await freePort()
+    const transforms: ((html: string) => string)[] = []
+    const ctx = {
+      logger: () => silentLogger(),
+      connection: { authenticatedUrl: fake.authenticatedUrl, requestRejection: () => undefined },
+      webServer: {
+        port: 3080,
+        register: () => () => {},
+        tapIndex: (transform: (html: string) => string) => {
+          transforms.push(transform)
+          return () => {}
+        },
+      },
+      effect: () => {},
+    } as unknown as Context
+
+    await apply(ctx, {
+      dataDir: await tmpDataDir(),
+      listenHost: '127.0.0.1',
+      listenPort: port,
+      upstreamOrigin: fake.origin,
+      tls: { mode: 'off' },
+      settingsUnlock: false,
+      // The two mobile patches default ON; the identity assertion below is
+      // about the tap being a no-op when NOTHING is requested.
+      mobileCompat: false,
+      socketWatchdog: false,
+      mobileScrollFix: false,
+      auth: { allowLoopback: true },
+    })
+
+    const index = '<html><head></head><body>app</body></html>'
+    expect(transforms[0]?.(index)).toBe(index)
+  })
+
+  it('keeps the unlock off while still shipping the mobile patches', async () => {
     fake = await startFakeDsh()
     const port = await freePort()
     const transforms: ((html: string) => string)[] = []
@@ -296,8 +396,10 @@ describe('apply', () => {
       auth: { allowLoopback: true },
     })
 
-    const index = '<html><head></head><body>app</body></html>'
-    expect(transforms[0]?.(index)).toBe(index)
+    const transformed = transforms[0]?.('<html><head></head><body>app</body></html>')
+    expect(transformed).not.toContain('dsh-lan-guard:settings-unlock')
+    expect(transformed).toContain('dsh-lan-guard:mobile-compat')
+    expect(transformed).toContain('dsh-lan-guard:socket-watchdog')
   })
 
   it('does not take the plugin down when the settings service is unavailable', async () => {

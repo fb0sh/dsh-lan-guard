@@ -111,6 +111,41 @@ export interface LanGuardConfigShape {
    * DSH), and writes stay bounded by this plugin's gate and admin policy.
    */
   settingsUnlock: boolean
+  /**
+   * Whether the proxy answers DSH's WebSocket Ping frames itself (default true).
+   *
+   * Measured 2026-09-28: the host pings `/api/remote.mux` every 2 s and drops a
+   * socket after two unanswered pings, so a phone that is suspended (screen
+   * locked, switched away) loses the session socket after 6 s and the chat
+   * transcript — which is the only part of the UI that rides that socket — never
+   * finishes loading. Answering from the proxy hop keeps the tunnel alive; the
+   * visitor's own Pong, when it comes, is a harmless duplicate.
+   */
+  answerHeartbeat: boolean
+  /**
+   * Whether the served index carries the client-side socket watchdog (default
+   * true). It closes sockets stuck in CONNECTING and, when a resume from the
+   * background leaves nothing open, reloads the page once — the only recovery
+   * from WebKit's "WebSocket never opens after resume" behaviour.
+   */
+  socketWatchdog: boolean
+  /**
+   * Whether the served index carries mobile compatibility shims (default true):
+   * `AbortSignal.any`/`timeout`, `Promise.withResolvers`, the `Iterator` global
+   * and the mobile viewport/PWA metas. DSH's client throws inside its stream
+   * path on engines without them, which leaves the chat stuck on
+   * 「载入历史…」 with no error message at all.
+   */
+  mobileCompat: boolean
+  /**
+   * Whether the served index carries the narrow-screen scroll correction
+   * (default true). Measured 2026-09-28: on a phone DSH's own shell clips the
+   * conversation column behind its fixed floats, so the chat cannot be dragged;
+   * desktop Chrome on the same viewport scrolls fine. The injected script only
+   * acts when the page as a whole cannot scroll and it finds a layer that is
+   * clipping overflowing content.
+   */
+  mobileScrollFix: boolean
   /** Visitor-side gate configuration. */
   auth: AuthConfigShape
   /** Transport security configuration. */
@@ -182,6 +217,13 @@ export const Config: z<LanGuardConfigShape, Record<string, unknown>> = z.object(
   // what protects the surface; an operator who wants DSH's stock behaviour
   // turns it off.
   settingsUnlock: z.boolean().default(true).volatile(),
+  // The three mobile-resilience switches (2026-09-28). All default ON because
+  // the failure they prevent is invisible until it happens, and each is
+  // individually switchable for an operator who wants the stock proxy.
+  answerHeartbeat: z.boolean().default(true).volatile(),
+  socketWatchdog: z.boolean().default(true).volatile(),
+  mobileCompat: z.boolean().default(true).volatile(),
+  mobileScrollFix: z.boolean().default(true).volatile(),
   auth: z.object({
     // NOT volatile on purpose (PLAN §5 工作项 9 lists the writable switches):
     // the gate master switch is a startup-safety field (SPEC §5 principle 3),
@@ -233,6 +275,14 @@ export interface LiveSwitches {
   allowLoopback(): boolean
   /** Whether LAN visitors get DSH's official settings surface. */
   settingsUnlock(): boolean
+  /** Whether the proxy answers DSH's WebSocket heartbeat while a visitor is suspended. */
+  answerHeartbeat(): boolean
+  /** Whether the served index carries the client-side socket watchdog. */
+  socketWatchdog(): boolean
+  /** Whether the served index carries the mobile compatibility shims. */
+  mobileCompat(): boolean
+  /** Whether the served index carries the narrow-screen scroll correction. */
+  mobileScrollFix(): boolean
   /** Whether an unnamed device must pair before it is let in. */
   requirePairing(): boolean
   /** Whether a paired device still needs the operator's approval (F9). */
@@ -270,6 +320,10 @@ export function liveSwitches(rawConfig: unknown, resolved: LanGuardConfigShape):
     listenPort: () => readField(root.listenPort, resolved.listenPort),
     listenHost: () => readField(root.listenHost, resolved.listenHost),
     settingsUnlock: () => readField(root.settingsUnlock, resolved.settingsUnlock),
+    answerHeartbeat: () => readField(root.answerHeartbeat, resolved.answerHeartbeat),
+    socketWatchdog: () => readField(root.socketWatchdog, resolved.socketWatchdog),
+    mobileCompat: () => readField(root.mobileCompat, resolved.mobileCompat),
+    mobileScrollFix: () => readField(root.mobileScrollFix, resolved.mobileScrollFix),
     mode: () => readField(root.auth === undefined ? undefined : auth.mode, resolved.auth.mode),
     adminPolicy: () => readField(root.auth === undefined ? undefined : auth.adminPolicy, resolved.auth.adminPolicy),
     adminProtection: () => readField(
@@ -293,6 +347,10 @@ export function staticSwitches(config: LanGuardConfigShape): LiveSwitches {
     listenPort: () => config.listenPort,
     listenHost: () => config.listenHost,
     settingsUnlock: () => config.settingsUnlock,
+    answerHeartbeat: () => config.answerHeartbeat,
+    socketWatchdog: () => config.socketWatchdog,
+    mobileCompat: () => config.mobileCompat,
+    mobileScrollFix: () => config.mobileScrollFix,
     mode: () => config.auth.mode,
     adminPolicy: () => config.auth.adminPolicy,
     adminProtection: () => config.auth.adminProtection,
@@ -424,7 +482,10 @@ function unwrapVolatileInput(input: unknown): unknown {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return input
   const source = input as Record<string, unknown>
   const result: Record<string, unknown> = { ...source }
-  for (const key of ['enabled', 'networkInterface', 'listenPort', 'listenHost', 'settingsUnlock']) {
+  for (const key of [
+    'enabled', 'networkInterface', 'listenPort', 'listenHost', 'settingsUnlock',
+    'answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix',
+  ]) {
     const value = result[key]
     if (isVolatileLike(value)) result[key] = (value as { get(): unknown }).get()
   }
@@ -477,6 +538,10 @@ export function parseConfig(input: unknown, profileDir?: string | undefined): La
     networkInterface: emptyToNull(readField(resolved.networkInterface, '')),
     dataDir: dataDir?.dir ?? null,
     settingsUnlock: readField(resolved.settingsUnlock, true),
+    answerHeartbeat: readField(resolved.answerHeartbeat, true),
+    socketWatchdog: readField(resolved.socketWatchdog, true),
+    mobileCompat: readField(resolved.mobileCompat, true),
+    mobileScrollFix: readField(resolved.mobileScrollFix, true),
     auth: {
       enabled: readField(rawAuth.enabled, true),
       mode: readField(rawAuth.mode, 'token_and_password'),

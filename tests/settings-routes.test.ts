@@ -12,6 +12,7 @@ import { AuthManager } from '../src/auth/manager.ts'
 import { staticSwitches, type LanGuardConfigShape } from '../src/config.ts'
 import { noopLogger } from '../src/log.ts'
 import { registerManagementRoutes, type SettingsWriterLike } from '../src/settings/routes.ts'
+import type { ProxyStats } from '../src/proxy.ts'
 import { DeviceRegistry } from '../src/store/devices.ts'
 import { SecretsStore } from '../src/store/secrets.ts'
 import { requestTo, type RawResponse, type RawRequestOptions } from './helpers/http-client.ts'
@@ -37,6 +38,10 @@ function configWith(overrides: Partial<LanGuardConfigShape['auth']> = {}): LanGu
     networkInterface: null,
     dataDir: null,
     settingsUnlock: true,
+    answerHeartbeat: true,
+    socketWatchdog: true,
+    mobileCompat: true,
+    mobileScrollFix: true,
     auth: {
       enabled: true,
       mode: 'token_and_password',
@@ -72,6 +77,8 @@ async function harness(options: {
   withSettings?: boolean
   password?: string | null
   adminPassword?: string | null
+  /** Supply live relay counters, as the plugin does when a proxy is running. */
+  relay?: { stats(): ProxyStats }
 } = {}): Promise<Harness> {
   const config = configWith(options.auth)
   const store = new SecretsStore(await tmpDataDir())
@@ -118,6 +125,7 @@ async function harness(options: {
       }),
     },
     devices,
+    ...(options.relay === undefined ? {} : { relay: options.relay }),
     access: async (secretToken) => ({
       port: config.listenPort,
       portFallbackFrom: null,
@@ -218,6 +226,10 @@ describe('snapshot', () => {
       listenHost: '127.0.0.1',
       networkInterface: '',
       settingsUnlock: true,
+      answerHeartbeat: true,
+      socketWatchdog: true,
+      mobileCompat: true,
+      mobileScrollFix: true,
       mode: 'token_and_password',
       adminPolicy: 'local_only',
       adminProtection: true,
@@ -736,5 +748,64 @@ describe('remote settings-page unlock (2026-09-26)', () => {
     const response = await post(harnessed.port, { preferences: { settingsUnlock: 'off' } })
     expect(response.status).toBe(400)
     expect(harnessed.updates).toEqual([])
+  })
+})
+
+describe('mobile resilience surface (2026-09-28)', () => {
+  it('reports all three switches in the snapshot', async () => {
+    const harnessed = await harness()
+    const response = await requestTo(harnessed.port, { path: '/plugins/dsh-lan-guard/config' })
+    const body = JSON.parse(response.body.toString()) as { preferences: Record<string, unknown> }
+    expect(body.preferences.answerHeartbeat).toBe(true)
+    expect(body.preferences.socketWatchdog).toBe(true)
+    expect(body.preferences.mobileCompat).toBe(true)
+    expect(body.preferences.mobileScrollFix).toBe(true)
+  })
+
+  it('writes each switch through the settings service', async () => {
+    for (const key of ['answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix'] as const) {
+      const harnessed = await harness()
+      const response = await post(harnessed.port, { preferences: { [key]: false } })
+      expect(response.status).toBe(200)
+      expect(harnessed.updates).toEqual([{ ns: 'dsh-lan-guard', patch: { [key]: false } }])
+      await closer?.()
+      closer = undefined
+    }
+  })
+
+  it('omits the relay counters when the host supplies no proxy', async () => {
+    const harnessed = await harness()
+    const response = await requestTo(harnessed.port, { path: '/plugins/dsh-lan-guard/config' })
+    expect(JSON.parse(response.body.toString()).connection).toBeUndefined()
+  })
+
+  it('reports the relay counters when a proxy is present (P5 health panel)', async () => {
+    const harnessed = await harness({
+      relay: {
+        stats: () => ({
+          wsActive: 1,
+          wsUpgrades: 7,
+          wsRefused: 2,
+          heartbeatAnswered: 41,
+          recent: [{
+            atMs: 1,
+            target: '/api/remote.mux',
+            upgraded: true,
+            durationMs: 6_000,
+            bytesToVisitor: 2_000_000,
+            bytesToUpstream: 12_000,
+            sawCloseFrame: false,
+          }],
+        }),
+      },
+    })
+    const response = await requestTo(harnessed.port, { path: '/plugins/dsh-lan-guard/config' })
+    const connection = JSON.parse(response.body.toString()).connection as {
+      heartbeatAnswered: number
+      recent: { durationMs: number; sawCloseFrame: boolean }[]
+    }
+    expect(connection.heartbeatAnswered).toBe(41)
+    expect(connection.recent[0]?.durationMs).toBe(6_000)
+    expect(connection.recent[0]?.sawCloseFrame).toBe(false)
   })
 })

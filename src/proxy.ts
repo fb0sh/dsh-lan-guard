@@ -35,7 +35,13 @@ import { noopLogger } from './log.ts'
 import type { VisitorGate } from './auth/gate.ts'
 import { ADMIN_COOKIE } from './auth/manager.ts'
 import type { UpstreamAuth } from './upstream-auth.ts'
-import { forwardUpgrade, guardUpgradeSocket, type UpstreamTarget } from './websocket.ts'
+import {
+  forwardUpgrade,
+  guardUpgradeSocket,
+  type RelayOutcome,
+  type UpgradeTunnel,
+  type UpstreamTarget,
+} from './websocket.ts'
 
 /**
  * The visitor cookies this proxy relays in BOTH directions.
@@ -71,8 +77,51 @@ export interface ProxyOptions {
   gate?: VisitorGate
   /** PEM certificate and key; when present the listener serves HTTPS. */
   tls?: { cert: string; key: string }
+  /**
+   * Answer the upstream's WebSocket Ping frames from this hop.
+   *
+   * DSH reaps a mux socket 6 s after its Pings stop being answered (measured
+   * 2026-09-28), which is exactly what happens while a phone is suspended. See
+   * `ws-heartbeat.ts`. A function is read per upgrade, so a live switch applies
+   * without a restart.
+   */
+  answerHeartbeat?: boolean | (() => boolean)
   /** Logger. */
   logger?: LanGuardLogger
+}
+
+/** One relayed WebSocket, as the management console sees it (P5). */
+export interface RelayEvent {
+  /** When the outcome was recorded, in epoch milliseconds. */
+  atMs: number
+  /** The request target the tunnel was opened for. */
+  target: string
+  /** Whether the upstream accepted the upgrade. */
+  upgraded: boolean
+  /** Upstream or gate status when the upgrade was refused. */
+  status?: number
+  /** Tunnel lifetime in milliseconds. */
+  durationMs: number
+  /** Bytes relayed upstream → visitor. */
+  bytesToVisitor: number
+  /** Bytes relayed visitor → upstream. */
+  bytesToUpstream: number
+  /** Whether the upstream sent a WebSocket Close frame before the socket died. */
+  sawCloseFrame: boolean
+}
+
+/** Live relay counters for the management console (P5). */
+export interface ProxyStats {
+  /** Upgraded tunnels currently open. */
+  wsActive: number
+  /** Upgrades the upstream accepted since start. */
+  wsUpgrades: number
+  /** Upgrades refused by the gate or the upstream since start. */
+  wsRefused: number
+  /** Pongs written to the upstream on a visitor's behalf since start. */
+  heartbeatAnswered: number
+  /** The last few outcomes, newest first. */
+  recent: readonly RelayEvent[]
 }
 
 /** A running proxy listener. */
@@ -87,6 +136,8 @@ export interface RunningProxy {
   readonly portFallback: boolean
   /** Stop listening and drop every live connection. */
   close(): Promise<void>
+  /** Relay counters and the most recent outcomes (P5 "连接体检"). */
+  stats(): ProxyStats
 }
 
 /** Bind one port, resolving on `listening` and rejecting on `error`. */
@@ -186,6 +237,54 @@ export async function startProxy(options: ProxyOptions): Promise<RunningProxy> {
   const upstream = parseUpstream(options.upstreamOrigin)
   const authority = authorityOf(options.upstreamOrigin)
   const sockets = new Set<Duplex>()
+  /** Live read of the heartbeat switch; a plain boolean is a fixed decision. */
+  const heartbeatEnabled = (): boolean => (
+    typeof options.answerHeartbeat === 'function'
+      ? options.answerHeartbeat()
+      : options.answerHeartbeat === true
+  )
+
+  // Relay counters for the management console's health panel (P5). They are a
+  // bounded ring: the panel reports the last few outcomes, never a log file.
+  const recent: RelayEvent[] = []
+  const liveTunnels = new Set<UpgradeTunnel>()
+  let wsActive = 0
+  let wsUpgrades = 0
+  let wsRefused = 0
+  /** Pongs answered by tunnels that have already closed. */
+  let heartbeatAnsweredClosed = 0
+  const recordRelay = (target: string, outcome: RelayOutcome): void => {
+    if (outcome.upgraded) {
+      wsActive = Math.max(0, wsActive - 1)
+    } else {
+      wsRefused += 1
+    }
+    recent.unshift({
+      atMs: Date.now(),
+      target,
+      upgraded: outcome.upgraded,
+      ...(outcome.status === undefined ? {} : { status: outcome.status }),
+      durationMs: outcome.durationMs,
+      bytesToVisitor: outcome.bytesToVisitor,
+      bytesToUpstream: outcome.bytesToUpstream,
+      sawCloseFrame: outcome.sawCloseFrame,
+    })
+    if (recent.length > 12) recent.pop()
+  }
+  const recordRefusal = (target: string, status: number): void => {
+    wsRefused += 1
+    recent.unshift({
+      atMs: Date.now(),
+      target,
+      upgraded: false,
+      status,
+      durationMs: 0,
+      bytesToVisitor: 0,
+      bytesToUpstream: 0,
+      sawCloseFrame: false,
+    })
+    if (recent.length > 12) recent.pop()
+  }
 
   const fail = (res: ServerResponse, code: number, body: string): void => {
     if (res.headersSent) {
@@ -331,12 +430,14 @@ export async function startProxy(options: ProxyOptions): Promise<RunningProxy> {
     // The error handler goes on BEFORE any await: a reconnect that drops the
     // socket mid-authentication must not emit an unhandled error.
     guardUpgradeSocket(socket, logger)
+    const upgradeTarget = normalizeRequestTarget(req.url)
     void (async () => {
       // A WebSocket upgrade is a request like any other and passes the gate
       // first; an unauthenticated upgrade is refused before any upstream work.
       if (options.gate !== undefined) {
         const refusal = await options.gate.verifyUpgrade(req)
         if (refusal !== undefined) {
+          recordRefusal(upgradeTarget, refusal.status)
           if (!socket.destroyed) {
             socket.write(`HTTP/1.1 ${String(refusal.status)} Unauthorized\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`)
           }
@@ -349,15 +450,17 @@ export async function startProxy(options: ProxyOptions): Promise<RunningProxy> {
         cookie = await options.auth.cookieHeader()
       } catch (error) {
         logger.warn('upgrade authentication failed name=%s', (error as Error).name)
+        recordRefusal(upgradeTarget, 502)
         socket.destroy()
         return
       }
-      forwardUpgrade({
+      let tunnel: ReturnType<typeof forwardUpgrade> | undefined
+      tunnel = forwardUpgrade({
         req,
         socket,
         head,
         upstream,
-        target: normalizeRequestTarget(req.url),
+        target: upgradeTarget,
         headers: buildUpstreamRequestHeaders({
           headers: req.headers,
           authority,
@@ -366,7 +469,22 @@ export async function startProxy(options: ProxyOptions): Promise<RunningProxy> {
           relayCookieNames: RELAY_COOKIE_NAMES,
         }),
         logger,
+        answerHeartbeat: heartbeatEnabled(),
+        onUpgraded: () => {
+          wsActive += 1
+          wsUpgrades += 1
+        },
+        onOutcome: (target, outcome) => {
+          // A closed tunnel's answered-ping count is folded into the totals; a
+          // still-open one is summed live by `stats()`.
+          if (tunnel !== undefined) {
+            liveTunnels.delete(tunnel)
+            heartbeatAnsweredClosed += tunnel.heartbeatAnswered()
+          }
+          recordRelay(target, outcome)
+        },
       })
+      if (tunnel !== undefined) liveTunnels.add(tunnel)
     })()
   })
 
@@ -398,6 +516,17 @@ export async function startProxy(options: ProxyOptions): Promise<RunningProxy> {
     port,
     requestedPort,
     portFallback: port !== requestedPort,
+    stats(): ProxyStats {
+      let heartbeatAnswered = heartbeatAnsweredClosed
+      for (const tunnel of liveTunnels) heartbeatAnswered += tunnel.heartbeatAnswered()
+      return {
+        wsActive,
+        wsUpgrades,
+        wsRefused,
+        heartbeatAnswered,
+        recent: [...recent],
+      }
+    },
     close(): Promise<void> {
       return new Promise<void>((resolve, reject) => {
         server.close((error) => {

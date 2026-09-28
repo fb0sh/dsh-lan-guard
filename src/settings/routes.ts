@@ -33,7 +33,8 @@ import { listDirectories } from '../workspace/browse.ts'
 import type { DeviceRecord } from '../store/secrets.ts'
 import type { DeviceStatus } from '../store/secrets.ts'
 import type { UpdateStatus } from '../update-check.ts'
-import { registerSettingsUnlock } from './index-tap.ts'
+import { registerIndexPatches } from './index-tap.ts'
+import type { ProxyStats } from '../proxy.ts'
 import {
   PreferenceError,
   sanitizePreferencePatch,
@@ -135,6 +136,8 @@ export interface ConfigSnapshot {
   devices: DeviceView[]
   /** How many devices are waiting for approval (F9). */
   pendingCount: number
+  /** WebSocket relay counters and the most recent outcomes (P5 health panel). */
+  connection?: ProxyStats
   /** The passwordless link, present only for an admin-unlocked caller. */
   secretToken?: string
 }
@@ -179,6 +182,8 @@ export interface ManagementRoutesOptions {
   devices: DeviceRegistryLike
   /** Update detection (F8): read-only, cached inside the checker. */
   updates: { check(options?: { force?: boolean }): Promise<UpdateStatus> }
+  /** Live WebSocket relay counters (P5). Absent in unit tests without a proxy. */
+  relay?: { stats(): ProxyStats } | undefined
   /**
    * Build the current access URL set and QR codes. Rebuilt per request, which
    * is what makes a NIC/port/TLS/token change refresh the QR.
@@ -302,6 +307,10 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
         listenHost: options.switches.listenHost(),
         networkInterface: options.switches.networkInterface() ?? '',
         settingsUnlock: options.switches.settingsUnlock(),
+        answerHeartbeat: options.switches.answerHeartbeat(),
+        socketWatchdog: options.switches.socketWatchdog(),
+        mobileCompat: options.switches.mobileCompat(),
+        mobileScrollFix: options.switches.mobileScrollFix(),
         mode: options.switches.mode(),
         adminPolicy: options.switches.adminPolicy(),
         adminProtection: options.switches.adminProtection(),
@@ -322,6 +331,8 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
       pendingCount: options.devices.list().filter(device => device.status === 'pending').length,
     }
     if (token !== undefined) snapshot.secretToken = token
+    const relay = options.relay
+    if (relay !== undefined) snapshot.connection = relay.stats()
     return snapshot
   }
 
@@ -726,21 +737,27 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
   }))
 
   /**
-   * Remote settings-page unlock.
+   * Index patches: the remote settings-page unlock, the mobile compatibility
+   * shims and the client-side socket watchdog.
    *
    * DSH disables its OFFICIAL settings surface for any page whose address bar
    * is not loopback, which is every device arriving through this gateway; the
    * proxy cannot change that because the decision is made in the visitor's
-   * browser. The index tap puts the flag DSH's desktop shell uses into the
-   * served document, and reads the live switch on every render so a toggle
-   * needs only a page refresh.
+   * browser. The same tap is where the phone-side shims belong: both are
+   * "the served document must carry this", and both read their live switch on
+   * every render so a toggle needs only a page refresh.
    */
-  const disposeUnlock = registerSettingsUnlock({
+  const disposePatches = registerIndexPatches({
     webServer: options.webServer,
-    enabled: () => options.switches.settingsUnlock(),
+    switches: {
+      settingsUnlock: () => options.switches.settingsUnlock(),
+      mobileCompat: () => options.switches.mobileCompat(),
+      mobileScrollFix: () => options.switches.mobileScrollFix(),
+      socketWatchdog: () => options.switches.socketWatchdog(),
+    },
     logger,
   })
-  if (disposeUnlock !== undefined) disposers.push(disposeUnlock)
+  if (disposePatches !== undefined) disposers.push(disposePatches)
 
   return () => {
     for (const dispose of disposers.reverse()) dispose()
