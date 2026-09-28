@@ -209,6 +209,8 @@ dsh plugin --profile web add "link:$(pwd)"
 
 **修复（`mobileScrollFix`，默认开）**：注入脚本**只在四条同时成立时**才动手——窄屏（≤1023px）、移动端 UA、**整页不可滚**、且**确实找到被裁剪且内容溢出的层**；然后只把那几层改成可触摸滚动（`overflow-y:auto`、`-webkit-overflow-scrolling:touch`、`touch-action:pan-y`）。能正常滚动的页面一律不碰。
 
+**「回到底部」按钮（0.4.2 起）**：窄屏下官方按钮的显示条件是「不在尾部」，而它判断的是官方认定的滚动层，与实际滚动层不一致，于是永远不出现；网关侧因此自带一个等价的浮动按钮（不在尾部时显示、点击平滑到底、官方按钮出现即让位、位置按输入框动态计算）。
+
 **自检**：在页面地址后加 `?lgdiag=1`，顶部会出现一屏诊断（`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / 是否已修`）。这一屏就是本次定位所用的数据，以后复现同类问题不必连 Mac 调试。
 
 ## 安全边界

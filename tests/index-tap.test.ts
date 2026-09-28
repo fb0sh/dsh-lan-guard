@@ -413,6 +413,13 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('touch-action')
     // Diagnostic mode is opt-in per page load and never blocks the UI.
     expect(body).toContain('lgdiag')
+    // The "back to bottom" button: the official one never appears on a phone
+    // because it judges the wrong scroll layer, so this one is independent of
+    // official state and yields to the official button when that one exists.
+    expect(body).toContain('lg-to-bottom')
+    expect(body).toContain('officialBtn')
+    expect(body).toContain('回到底部')
+    expect(body).toContain('scrollTo')
     expect(body).toContain('pointer-events:none')
     // Idempotent.
     expect(injectMobileScrollFix(out)).toBe(out)

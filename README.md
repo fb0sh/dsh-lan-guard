@@ -209,6 +209,8 @@ The official UI is reused with zero modifications and adapts on a phone viewport
 
 **Fix (`mobileScrollFix`, on by default)**: the injected script only acts when narrow screen AND mobile UA AND the page cannot scroll AND it actually finds a layer clipping overflowing content; it then makes exactly those layers touch-scrollable (`overflow-y:auto`, `-webkit-overflow-scrolling:touch`, `touch-action:pan-y`). Healthy pages are never touched.
 
+**"Back to bottom" button (from 0.4.2)**: on narrow screens the official button shows only when not at the tail, judged against the scroll layer the official code believes in — which is not the layer that actually scrolls, so it never appears. The gateway therefore ships an equivalent floating button (shown whenever the view is not at the bottom, smooth-scrolls on click, yields to the official button once that appears, and positions itself above the composer).
+
 **Self-check**: append `?lgdiag=1` to the page URL for an on-screen report (`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / patched`). That report is exactly the data that located this bug.
 
 

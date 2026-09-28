@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-guard",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "DSH web plugin: expose the official desktop Web UI to the local network through a gated reverse proxy, without touching DSH's own loopback binding.",
   "license": "MIT",
   "type": "module",
