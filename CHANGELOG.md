@@ -31,6 +31,11 @@ html, body, #root { height:100%; overflow:hidden }
 
 新增 `touchPassThrough()`：只对**纯视觉容器**放行触摸（全屏覆盖、`pointer-events` 非 none、不含 button/input/textarea/select/[contenteditable]、文本 <40 字符），设 `pointer-events:none !important`；真正的交互层一律不碰。
 
+### 兼容性声明 — DSH 0.2.0-rc.1
+
+- `dsh.engines.dsh`、`peerDependencies['@deepseek-ai/dsh-client-connection']` 与 `peerDependencies['@deepseek-ai/dsh-host-webserver']` 的上界由 `<0.2.0` 放宽为 `<0.3.0`，`dsh.compatibility.dshReleases` 新增 `0.2.0-rc.1: compatible`。旧上界是一颗定时炸弹：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 DSH `0.2.0` 正式版——正式版发布当天本插件会被静默丢弃。
+- 依据：本插件正以 link 方式运行在当前 DSH `0.2.0-rc.1` profile 中（无 skipping 警告）；`dsh.client.inject` 涉及的宿主包（`dsh-client-ui-renderer`、`dsh-client-ui-layout`、`dsh-client-ui-settings(-general)`）与 peer 包（`dsh-client-connection`、`dsh-host-webserver`）在 `dsh-v0.1.7-rc.2` → `dsh-v0.2.0-rc.1` 之间仅有版本号改动，本插件用到的接口面（`webServer.register` / `tapIndex`、`connection.requestRejection`、`connection.authenticatedUrl`、`settings.section` seat）无一变化。仅声明，零代码。
+
 ### 升级
 
 ```sh

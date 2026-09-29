@@ -163,7 +163,7 @@ dsh plugin --profile web add "link:$(pwd)"
 | `0.1.1` | `0.1.7-rc.1` | 文档版：中英双语用户 README |
 | `0.1.0` | `0.1.7-rc.1` | 首个版本：门禁反向代理、自签 HTTPS、设备配对、设置页、扫码访问 |
 
-- 声明范围 `>=0.1.7-rc.1 <0.2.0`（`dsh.engines.dsh`）；未列入的 DSH 版本属**未验证**，请自行验证后再使用。
+- 声明范围 `>=0.1.7-rc.1 <0.3.0`（`dsh.engines.dsh`）；已验证版本：`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`。未列入的 DSH 版本属**未验证**，请自行验证后再使用。上界在 `0.4.3` 从 `<0.2.0` 放宽：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 `0.2.0` 正式版。
 - 本插件用到的宿主/客户端接口：`webServer.register` / `webServer.tapIndex`（indexTaps）、`connection.requestRejection`、`connection.authenticatedUrl`、追加型 `settings.section` seat、`@deepseek-ai/schemastery`，以及 `profileContext`（用于推导默认数据目录）。
 - **破坏性默认值变更（`0.3.2` 起）**：`listenHost` 默认由 `127.0.0.1` 改为 `0.0.0.0`，装完重启一次即可用；`0.3.1` 及更早默认仅回环。门禁与自签 TLS 的默认值未变（未设密码仍拒绝所有设备）。详见 [CHANGELOG](CHANGELOG.md)。
 - **`0.4.0` 的验证状态**：三处改动都做了实测，不只跑用例。
