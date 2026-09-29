@@ -235,7 +235,10 @@ export function mobileScrollFixScript(): string {
     // convScrolls() 为真（有溢出）但可滚范围远小于内容实际高度，故必须在这条
     // 短路之前处理，否则同样永远执行不到。
     + 'if(fixClip()){log("clip released -> max="+(conv().scrollHeight-conv().clientHeight));done=true;return}'
-    + 'if(convScrolls()){log("official scroll layer already works");done=true;return}'
+    // Long transcripts hydrate after the official scroller has acquired a small
+    // scroll range. Keep polling briefly so a late overflow:hidden child is
+    // still released instead of treating that intermediate state as healthy.
+    + 'if(convScrolls()){log("official scroll layer works; waiting for late clip");return}'
     + 'if(fix())done=true}'
     + 'run();'
     + 'var t=setInterval(function(){tries++;run();if(done||tries>30)clearInterval(t)},1500);'
