@@ -429,13 +429,19 @@ describe('injectMobileScrollFix', () => {
     // scroll layer IS scrollable, yet fingers cannot drag — fullscreen
     // decorative layers swallow touches on iOS. Let pure containers through.
     expect(body).toContain('touchPassThrough')
-    // It must run BEFORE the "official scroll layer already works" short-circuit:
-    // that state IS the "content visible, finger cannot drag" case, so returning
-    // first made touchPassThrough() unreachable and the runbook's `layers=N`
-    // line unprintable (regression guard, 2026-09-29).
-    expect(body).toContain(
-      'touchPassThrough();if(convScrolls()){log("official scroll layer already works")',
-    )
+    // Both remedies must run BEFORE the "official scroll layer already works"
+    // short-circuit: that state IS the "content visible, finger cannot drag"
+    // case, so returning first made them unreachable and the runbook's
+    // `layers=N` line unprintable (regression guard, 2026-09-29).
+    expect(body).toContain('touchPassThrough();if(fixClip())')
+    // DSH 0.2.0-rc.1 regression: the official scroller's own content is clipped
+    // by an inner overflow:hidden layer — measured on the phone, 21083px of
+    // content yielded only a 336px scroll range. Release inner clip layers only
+    // (never anything outside the scroller), and revert wholesale when that
+    // does not actually widen the range.
+    expect(body).toContain('clip release layers=')
+    expect(body).toContain('clip release ineffective -> reverted')
+    expect(body).toContain('c.contains(list[i])')
     expect(body).toContain('pointer-events","none')
     expect(body).toContain('querySelector("button,input,textarea,select,[contenteditable]")')
     expect(body).not.toContain('overflow-y","auto')
