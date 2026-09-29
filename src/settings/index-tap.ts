@@ -181,7 +181,6 @@ export function mobileScrollFixScript(): string {
     + 'log("touch passthrough layers="+n);'
     + 'return n}'
     + 'function fix(){'
-    + 'touchPassThrough();'
     + 'if(convScrolls()){log("official scroll layer works; done");return true}'
     + 'var list=clipping();var clip=list[0];'
     + 'log("clipping="+list.length+(clip?(" first="+String(typeof clip.className==="string"?clip.className:"")+" "+clip.clientHeight+"/"+clip.scrollHeight):""));'
@@ -204,6 +203,10 @@ export function mobileScrollFixScript(): string {
     + 'log("narrow="+narrow+" mobile="+mobile+" innerH="+innerHeight+" vv="+(self.visualViewport?self.visualViewport.height:"-")+" pageScrolls="+pageScrolls());'
     + 'if(!narrow||!mobile){done=true;return}'
     + 'if(overlayOpen()){undoAll();log("overlay/dialog open -> reverted");return}'
+    // 放行必须发生在 convScrolls() 短路之前：官方滚动层"按尺寸可滚"正是
+    // "内容看得见却拖不动"的场景（触摸被全屏视觉层吃掉），此时若直接 return，
+    // touchPassThrough() 就永远不会执行，Runbook 期望的 layers=N 也打不出来。
+    + 'touchPassThrough();'
     + 'if(convScrolls()){log("official scroll layer already works");done=true;return}'
     + 'if(fix())done=true}'
     + 'run();'

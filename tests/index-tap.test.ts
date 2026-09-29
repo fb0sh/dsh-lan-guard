@@ -429,6 +429,13 @@ describe('injectMobileScrollFix', () => {
     // scroll layer IS scrollable, yet fingers cannot drag — fullscreen
     // decorative layers swallow touches on iOS. Let pure containers through.
     expect(body).toContain('touchPassThrough')
+    // It must run BEFORE the "official scroll layer already works" short-circuit:
+    // that state IS the "content visible, finger cannot drag" case, so returning
+    // first made touchPassThrough() unreachable and the runbook's `layers=N`
+    // line unprintable (regression guard, 2026-09-29).
+    expect(body).toContain(
+      'touchPassThrough();if(convScrolls()){log("official scroll layer already works")',
+    )
     expect(body).toContain('pointer-events","none')
     expect(body).toContain('querySelector("button,input,textarea,select,[contenteditable]")')
     expect(body).not.toContain('overflow-y","auto')
