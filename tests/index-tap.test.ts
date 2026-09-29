@@ -420,6 +420,16 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('officialBtn')
     expect(body).toContain('回到底部')
     expect(body).toContain('scrollTo')
+    // The drawer/scrim must win: our !important scroll style conflicted with the
+    // official scroll-lock + z-index while a dialog was open (2026-09-28 report:
+    // the left sidebar appeared behind a grey scrim). So the patch must be able
+    // to UNDO itself when an overlay is present.
+    expect(body).toContain('overlayOpen')
+    expect(body).toContain('undoAll')
+    expect(body).toContain('removeProperty')
+    expect(body).toContain('aria-modal=true')
+    // No iOS compositing hint: it forces a layer that broke stacking order.
+    expect(body).not.toContain('-webkit-overflow-scrolling')
     expect(body).toContain('pointer-events:none')
     // Idempotent.
     expect(injectMobileScrollFix(out)).toBe(out)
