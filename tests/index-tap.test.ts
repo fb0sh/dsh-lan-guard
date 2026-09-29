@@ -409,26 +409,24 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('max-width: 1023px')
     expect(body).toContain('iPhone|iPad|iPod|Android')
     expect(body).toContain('clipping()')
-    expect(body).toContain('overflow-y')
-    expect(body).toContain('touch-action')
     // Diagnostic mode is opt-in per page load and never blocks the UI.
     expect(body).toContain('lgdiag')
-    // The "back to bottom" button: the official one never appears on a phone
-    // because it judges the wrong scroll layer, so this one is independent of
-    // official state and yields to the official button when that one exists.
-    expect(body).toContain('lg-to-bottom')
-    expect(body).toContain('officialBtn')
-    expect(body).toContain('回到底部')
-    expect(body).toContain('scrollTo')
-    // The drawer/scrim must win: our !important scroll style conflicted with the
-    // official scroll-lock + z-index while a dialog was open (2026-09-28 report:
-    // the left sidebar appeared behind a grey scrim). So the patch must be able
-    // to UNDO itself when an overlay is present.
-    expect(body).toContain('overlayOpen')
-    expect(body).toContain('undoAll')
+    // 0.4.3 strategy: fix the HEIGHT CHAIN (dsh-mobile's approach) instead of
+    // patching overflow on a content layer. The container the official code
+    // believes in must become the real scroller, or nothing is changed at all.
+    expect(body).toContain('min-height')
+    expect(body).toContain('100dvh')
+    expect(body).toContain('data-conversation-scroll')
+    expect(body).toContain('convScrolls')
+    // Failure must revert completely (page stays stock).
     expect(body).toContain('removeProperty')
+    expect(body).toContain('ineffective -> reverted')
+    // Drawer/scrim safety (the 0.4.2 regression).
+    expect(body).toContain('overlayOpen')
     expect(body).toContain('aria-modal=true')
-    // No iOS compositing hint: it forces a layer that broke stacking order.
+    // And it must NOT do the things that caused the reported regressions:
+    expect(body).not.toContain('overflow-y","auto')
+    expect(body).not.toContain('lg-to-bottom')
     expect(body).not.toContain('-webkit-overflow-scrolling')
     expect(body).toContain('pointer-events:none')
     // Idempotent.

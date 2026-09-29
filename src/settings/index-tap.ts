@@ -110,10 +110,34 @@ export const MOBILE_SCROLL_MARKER = '/*dsh-lan-guard:mobile-scroll*/'
  *
  * @returns one inline `<script>` element.
  */
+/**
+ * 窄屏高度链修正（2026-09-28 第三次修订，照抄 dsh-mobile 的做法）。
+ *
+ * 事实（真机 + 官方源码 + 竞品对照）：
+ *
+ * - 官方外壳在窄屏 iOS 下把内容裁在 `pI_x6G_frame`（实测 clientH 844 /
+ *   scrollH 1688），而 conversation 认定的滚动层 `[data-conversation-scroll]`
+ *   始终 754/754：内容根本没进它的流。结果：手指拖不动、官方「回到底部」
+ *   按钮点了没反应、打开会话也不会自动停到最新消息。
+ * - dsh-mobile 能做对，靠的是**高度链**而不是滚动补丁：
+ *   `html,body,#root{height:100%;overflow:hidden}` +
+ *   shell `height:100dvh` + 主区 `min-height:0`（flex 子项允许收缩）。
+ *
+ * 因此本脚本只做同一件事，并且**绝不改任何 overflow-y、绝不新建滚动容器、
+ * 绝不加自己的按钮**：
+ *
+ * 1. 给 `html/body/#root` 一个确定高度（`100%`，支持时 `100dvh`）并锁住页面滚动；
+ * 2. 沿着「被裁且内容溢出」的那一层，给链上所有 flex/grid 容器补 `min-height:0`；
+ * 3. 立刻验证官方认定的滚动层是否真的能滚了：能 → 保留；不能 → **全部撤销**，
+ *    页面回到与官方逐字节一致的状态（宁可不动，也不引入第二个滚动层）。
+ *
+ * 抽屉/遮罩打开时同样先撤销自己（0.4.2 的遮罩事故教训）。
+ *
+ * @returns one inline `<script>` element.
+ */
 export function mobileScrollFixScript(): string {
   return `<script>${MOBILE_SCROLL_MARKER}(function(){try{`
-    + 'var diag=/[?&]lgdiag/.test(self.location.search);'
-    + 'var out=[];'
+    + 'var diag=/[?&]lgdiag/.test(self.location.search);var out=[];'
     + 'function log(s){out.push(s);if(diag)draw()}'
     + 'function draw(){try{var p=document.getElementById("lgsc");'
     + 'if(!p){p=document.createElement("pre");p.id="lgsc";p.style.cssText='
@@ -121,6 +145,12 @@ export function mobileScrollFixScript(): string {
     + 'color:#0f0;font:10px/1.3 monospace;padding:6px;margin:0;overflow:auto;white-space:pre-wrap;pointer-events:none";'
     + '(document.body||document.documentElement).appendChild(p)}'
     + 'p.textContent="[lan-guard 手机滚动诊断]"+String.fromCharCode(10)+out.join(String.fromCharCode(10))}catch(e){}}'
+    + 'var touched=[];'
+    + 'function set(el,prop,val){if(!el)return;try{el.style.setProperty(prop,val,"important");'
+    + 'touched.push([el,prop])}catch(e){}}'
+    + 'function undoAll(){for(var i=0;i<touched.length;i++){try{touched[i][0].style.removeProperty(touched[i][1])}catch(e){}}touched=[]}'
+    + 'function conv(){try{return document.querySelector("[data-conversation-scroll]")}catch(e){return null}}'
+    + 'function convScrolls(){var c=conv();return !!c&&c.scrollHeight>c.clientHeight+8}'
     + 'function pageScrolls(){var d=document.documentElement,b=document.body;'
     + 'return (d&&d.scrollHeight>d.clientHeight+8)||(b&&b.scrollHeight>b.clientHeight+8)}'
     + 'function clipping(){var r=[];var all=document.querySelectorAll("div");var lim=Math.min(all.length,5000);'
@@ -128,12 +158,6 @@ export function mobileScrollFixScript(): string {
     + 'if(cs.overflowY!=="hidden"&&cs.overflowY!=="clip")continue;'
     + 'if(el.clientHeight<150)continue;if(el.scrollHeight<=el.clientHeight+8)continue;r.push(el)}'
     + 'r.sort(function(a,b){return (b.scrollHeight-b.clientHeight)-(a.scrollHeight-a.clientHeight)});return r}'
-    // 抽屉/遮罩打开时，官方会锁定滚动并靠层级把内容盖住；我们那条 !important
-    // 会跟它打架（用户 2026-09-28 报告：打开左侧边栏被灰雾遮住，关掉本开关即恢复）。
-    // 因此一旦检测到全屏遮罩/对话框，就完全撤销我们加过的样式，把页面还给官方。
-    + 'var touched=[];'
-    + 'function undoAll(){for(var i=0;i<touched.length;i++){var t=touched[i];'
-    + 't.style.removeProperty("overflow-y");t.style.removeProperty("touch-action");}touched=[]}'
     + 'function overlayOpen(){'
     + 'try{if(document.querySelector("[aria-modal=true],[role=dialog],[data-conversation-overlay]"))return true;'
     + 'var el=document.elementFromPoint(Math.round(innerWidth*0.92),Math.round(innerHeight*0.45));'
@@ -142,70 +166,32 @@ export function mobileScrollFixScript(): string {
     + 'var r=el.getBoundingClientRect();'
     + 'if(r.width>innerWidth*0.85&&r.height>innerHeight*0.7)return true}'
     + 'el=el.parentElement}}catch(e){}return false}'
-    + 'function run(){'
+    + 'function fix(){'
+    + 'var list=clipping();var clip=list[0];'
+    + 'log("clipping="+list.length+(clip?(" first="+String(typeof clip.className==="string"?clip.className:"")+" "+clip.clientHeight+"/"+clip.scrollHeight):""));'
+    + 'var root=document.getElementById("root");'
+    + 'set(document.documentElement,"height","100%");'
+    + 'set(document.body,"height","100%");set(document.body,"overflow","hidden");'
+    + 'set(root,"height","100dvh");set(root,"min-height","0");set(root,"overflow","hidden");'
+    + 'var n=clip,d=0;'
+    + 'while(n&&n!==document.body&&d<8){var cs=getComputedStyle(n);'
+    + 'if(cs.display.indexOf("flex")>=0||cs.display.indexOf("grid")>=0)set(n,"min-height","0");'
+    + 'n=n.parentElement;d++}'
+    + 'var ok=convScrolls();'
+    + 'log("chainFix convScroll="+(conv()?(conv().clientHeight+"/"+conv().scrollHeight):"n/a")+" scrollable="+ok);'
+    + 'if(!ok){undoAll();log("ineffective -> reverted (stock page)")}'
+    + 'return ok}'
+    + 'var done=false,tries=0;'
+    + 'function run(){if(done)return;'
     + 'var narrow=self.matchMedia?self.matchMedia("(max-width: 1023px)").matches:false;'
     + 'var mobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||"");'
     + 'log("narrow="+narrow+" mobile="+mobile+" innerH="+innerHeight+" vv="+(self.visualViewport?self.visualViewport.height:"-")+" pageScrolls="+pageScrolls());'
-    + 'if(!narrow||!mobile)return;'
-    + 'if(overlayOpen()){undoAll();log("overlay/dialog open -> our styles reverted");return}'
-    + 'if(pageScrolls()){log("page already scrolls; no patch");return}'
-    + 'var list=clipping();'
-    + 'log("clippingLayers="+list.length);'
-    + 'for(var i=0;i<list.length&&i<3;i++){var el=list[i];var cls=typeof el.className==="string"?el.className:"";'
-    + 'log("  C"+i+" "+cls+" "+el.clientHeight+"/"+el.scrollHeight);'
-    + 'el.style.setProperty("overflow-y","auto","important");'
-    + 'el.style.setProperty("touch-action","pan-y","important");'
-    + 'if(touched.indexOf(el)<0)touched.push(el);'
-    + 'log("  C"+i+" patched -> scrollable="+(el.scrollHeight>el.clientHeight+8));}'
-    + '}'
-    + 'var tries=0;run();'
-    + 'var t=setInterval(function(){tries++;run();if(tries>15)clearInterval(t)},1200);'
-    // ---- 回到底部按钮 ------------------------------------------------------
-    // 官方自带这个按钮（chat.toBottom），显示条件是「不在尾部」，而该判断基于官方
-    // 认定的滚动层；窄屏布局下实际滚动发生在另一层，官方就永远以为还在尾部、按钮
-    // 不出现（用户 2026-09-28 报告）。这里放一个自己的：不依赖官方内部状态，直接
-    // 找"当前真正在滚动的容器"滚到底；官方按钮一旦出现就自动让位，避免两个按钮。
-    + 'var BTN="lg-to-bottom";'
-    + 'function officialBtn(){var bs=document.querySelectorAll("button[aria-label]");'
-    + 'for(var i=0;i<bs.length;i++){var a=bs[i].getAttribute("aria-label")||"";'
-    + 'if(a.indexOf("底部")>=0||/bottom/i.test(a))return bs[i]}return null}'
-    + 'function scroller(){var cands=[];var conv=document.querySelector("[data-conversation-scroll]");'
-    + 'if(conv)cands.push(conv);'
-    + 'var all=document.querySelectorAll("div");var lim=Math.min(all.length,5000);'
-    + 'for(var i=0;i<lim;i++){var el=all[i];if(el.scrollHeight>el.clientHeight+40)cands.push(el)}'
-    + 'var best=null,gap=0;'
-    + 'for(var j=0;j<cands.length;j++){var e=cands[j];var r=e.getBoundingClientRect();'
-    + 'if(r.width<80||r.height<120)continue;var g=e.scrollHeight-e.clientHeight;'
-    + 'if(g>gap){gap=g;best=e}}return best}'
-    + 'function place(b){try{var ta=document.querySelector("textarea,[contenteditable=true]");'
-    + 'if(ta){var r=ta.getBoundingClientRect();'
-    + 'b.style.bottom=Math.max(12,Math.round(innerHeight-r.top)+10)+"px";return}}catch(e){}'
-    + 'b.style.bottom="calc(env(safe-area-inset-bottom,0px) + 170px)"}'
-    + 'function update(){try{'
-    // 遮罩/抽屉打开时也让位：此时遮挡关系归官方，自己不要出现在上面。
-    + 'if(overlayOpen()){var ob=document.getElementById(BTN);if(ob)ob.style.display="none";return}'
-    + 'if(officialBtn()){var old=document.getElementById(BTN);if(old)old.remove();return}'
-    + 'var sc=scroller();var show=!!sc&&(sc.scrollTop+sc.clientHeight<sc.scrollHeight-40);'
-    + 'var b=document.getElementById(BTN);'
-    + 'if(!show){if(b)b.style.display="none";return}'
-    + 'if(!b){b=document.createElement("button");b.id=BTN;b.type="button";'
-    + 'b.setAttribute("aria-label","回到底部");'
-    + 'b.innerHTML="<svg width=18 height=18 viewBox=\\"0 0 16 16\\" fill=none>'
-    + '<path d=\\"M4 6.5 8 10.5l4-4\\" stroke=currentColor stroke-width=1.6 stroke-linecap=round stroke-linejoin=round/></svg>";'
-    + 'b.style.cssText="position:fixed;right:14px;width:36px;height:36px;border:0;border-radius:50%;'
-    + 'display:flex;align-items:center;justify-content:center;cursor:pointer;'
-    + 'color:var(--dsw-alias-label-primary,inherit);'
-    + 'background:var(--dsw-alias-button-floating-fill,rgba(128,128,128,.35));'
-    + 'box-shadow:0 2px 10px rgba(0,0,0,.3);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);'
-    + 'z-index:60;pointer-events:auto;padding:0";'
-    + 'b.addEventListener("click",function(){var s=scroller();if(!s)return;'
-    + 'try{s.scrollTo({top:s.scrollHeight,behavior:"smooth"})}catch(e){s.scrollTop=s.scrollHeight}});'
-    + '(document.body||document.documentElement).appendChild(b)}'
-    + 'place(b);b.style.display="flex";'
-    + '}catch(e){}}'
-    + 'addEventListener("scroll",update,true);'
-    + 'addEventListener("resize",update);'
-    + 'setInterval(update,1000);'
+    + 'if(!narrow||!mobile){done=true;return}'
+    + 'if(overlayOpen()){undoAll();log("overlay/dialog open -> reverted");return}'
+    + 'if(convScrolls()){log("official scroll layer already works");done=true;return}'
+    + 'if(fix())done=true}'
+    + 'run();'
+    + 'var t=setInterval(function(){tries++;run();if(done||tries>30)clearInterval(t)},1500);'
     + '}catch(e){}})()</script>'
 }
 

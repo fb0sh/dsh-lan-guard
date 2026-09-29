@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.4.3] — 2026-09-28（改用 dsh-mobile 式「高度链」修正，移除自建补丁）
+
+### 方向修正 — 不再给内容层打 overflow 补丁
+
+**对照实验（用户实测）**：3080 直连（本插件注入不生效）**能正常拖动**；3081 经代理（注入生效）**拖不动**；而 dsh-mobile 在**同一套官方 UI、同一台手机**上可用。
+
+**dsh-mobile 的做法是移动端「高度链」**（`src/mobile-layout.ts`）：
+
+```css
+html, body, #root { height:100%; overflow:hidden }
+.dshm-shell { height:100dvh }   /* dvh，不是 vh */
+.dshm-main  { min-height:0 }    /* flex/grid 子项允许收缩 */
+```
+
+**根因**：官方外壳在窄屏 iOS 下高度链断裂——实测内容 1688 被裁在 844 的层里，而官方认定的滚动层 `[data-conversation-scroll]` 永远 754/754（内容没进它的流）。后果：手指拖不动、官方「回到底部」点了没反应、**打开会话也不会停在最新消息**。0.4.1/0.4.2 给内容层打 `overflow-y:auto !important` 是治标，并引发了白屏与抽屉遮罩两个副作用。
+
+**0.4.3 的做法**（`mobileScrollFix`）：
+
+1. 给 `html/body/#root` 一个确定高度（`100%`，支持时 `100dvh`）并锁住页面滚动；
+2. 沿「被裁且内容溢出」的那一层，给链上所有 flex/grid 容器补 `min-height:0`；
+3. **立刻验证**官方认定的滚动层是否真的能滚：能 → 保留；**不能 → 全部撤销**，页面回到与官方逐字节一致（宁可不动，也不引入第二个滚动层）；
+4. 遮罩/对话框打开时同样先撤销（0.4.2 遮罩事故的教训）。
+
+**移除**：自建「回到底部」按钮（官方按钮恢复工作，且打开会话会自动停在最新）、内容层 `overflow-y`/`touch-action` 补丁、`-webkit-overflow-scrolling`。
+
+### 升级
+
+```sh
+dsh plugin --profile web add dsh-lan-guard@latest
+```
+
+重启一次 dsh 生效。
+
 ## [0.4.2] — 2026-09-28（手机端补上「回到底部」按钮）
 
 ### 修复 — 手机上滚动到中间时没有回到底部的按钮
