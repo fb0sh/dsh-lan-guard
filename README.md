@@ -147,10 +147,11 @@ The plugin reads its config from its Cordis entry. **Every key has a usable defa
 
 ## Compatibility
 
-Current version: plugin **`0.4.0`**; mobile long-connection self-healing — the proxy answers DSH's WebSocket heartbeat, and the served page carries a socket watchdog plus mobile compatibility shims (verified on DeepSeek Harness **`0.1.7-rc.2`**).
+Current version: plugin **`0.4.4`**; compensates a DSH `0.2.0-rc.1` layout regression in which an inner `overflow:hidden` layer clipped the session content, leaving the official scroller only 336px of range (verified on DeepSeek Harness **`0.2.0-rc.1`**, `0.1.7-rc.2`).
 
 | Plugin | Verified DeepSeek Harness | What this version is |
 | --- | --- | --- |
+| **`0.4.4`** | **`0.2.0-rc.1`**, `0.1.7-rc.2` | iOS session scrolling on DSH `0.2.0-rc.1`: an inner `overflow:hidden` layer with a locked height clipped the conversation (measured on device: 21083px of content behind a 336px scroll range), so a session did not open at the newest message and barely dragged. `mobileScrollFix` now grows that inner layer and drops its scroll-container role, restoring 20675px — verified on device with the composer still pinned and the official "back to bottom" button back in place |
 | **`0.4.0`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Mobile long-connection self-healing: the proxy answers DSH's WebSocket heartbeat (measured: 6 s reap without it, 20 s+ survival with it); page patches adding a socket watchdog and mobile compatibility shims; a connection health check and relay counters on the "connection" tab |
 | **`0.3.6`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Adding a workspace from a remote device: the browser half shadows the official directory flow (the local browser keeps the OS dialog, a remote device gets an in-page browser and can unlock inside it); fixes the proxy dropping the plugin's admin cookie in both directions, which made `password_unlock` meaningless remotely; adds the missing "remote management rights" control; moves the "saved" confirmation to a top-right notification; reworks status-surface colours against measured contrast; fixes the picker's crushed breadcrumb/shortcut rows |
 | **`0.3.5`** | **`0.1.7-rc.2`**, `0.1.7-rc.1` | Connection-level visibility: an `http://` request to the TLS port goes from "blank page + no log" to a 301 onto `https` with a log line; a deleted device record no longer locks that browser out (revoked/blocked still refuse); the removal-page copy follows |

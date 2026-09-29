@@ -180,6 +180,30 @@ export function mobileScrollFixScript(): string {
     + 'el.style.setProperty("pointer-events","none","important");n++}'
     + 'log("touch passthrough layers="+n);'
     + 'return n}'
+    // DSH 0.2.0-rc.1 回归：会话内容被官方滚动层**内部**某个 overflow:hidden/clip
+    // 的层裁掉，高度传不上去（真机实测：21083px 的内容只换来 336px 可滚范围），
+    // 于是"打开会话停不到最新消息、手指也拖不动"。
+    // 两条一起改，缺一不可（真机矩阵实测）：
+    //   height:auto      —— 让该层长高到内容高度，高度才能回流到官方滚动层；
+    //   overflow:visible —— 让该层不再是滚动容器，否则它内部的 sticky 控件会以
+    //                       "该层自己的底边"为参照：官方「回到底部」按钮的槽
+    //                       （EvIC1a_toBottomSlot，sticky bottom:208px）会从
+    //                       屏幕内(y≈514)掉到内容底部(y≈10683)而消失。
+    // 实测（同一长会话，滚到中段）：
+    //   stock            可滚 336   输入框[588,780] ↓[514,548] 可见
+    //   只 height:auto   可滚 20675 输入框[588,780] ↓[10683,10717] 不可见 ✗
+    //   height+visible   可滚 20675 输入框[588,780] ↓[538,572] 可见 ✓
+    // 绝不新建滚动容器、绝不动滚动层以外的层；以"可滚范围是否真的变大"自检，无效整体回退。
+    + 'function fixClip(){'
+    + 'var c=conv();if(!c)return false;'
+    + 'var list=clipping();var before=c.scrollHeight-c.clientHeight;var n=0;'
+    + 'for(var i=0;i<list.length;i++){if(!c.contains(list[i]))continue;'
+    + 'set(list[i],"height","auto");set(list[i],"overflow","visible");n++}'
+    + 'if(!n)return false;'
+    + 'var after=c.scrollHeight-c.clientHeight;'
+    + 'log("clip grow layers="+n+" max "+before+"->"+after);'
+    + 'if(after<=before+8){undoAll();log("clip grow ineffective -> reverted");return false}'
+    + 'return true}'
     + 'function fix(){'
     + 'if(convScrolls()){log("official scroll layer works; done");return true}'
     + 'var list=clipping();var clip=list[0];'
@@ -207,6 +231,10 @@ export function mobileScrollFixScript(): string {
     // "内容看得见却拖不动"的场景（触摸被全屏视觉层吃掉），此时若直接 return，
     // touchPassThrough() 就永远不会执行，Runbook 期望的 layers=N 也打不出来。
     + 'touchPassThrough();'
+    // 再修"内容被滚动层内部裁剪层吃掉高度"（0.2.0-rc.1 回归）：它表现为
+    // convScrolls() 为真（有溢出）但可滚范围远小于内容实际高度，故必须在这条
+    // 短路之前处理，否则同样永远执行不到。
+    + 'if(fixClip()){log("clip released -> max="+(conv().scrollHeight-conv().clientHeight));done=true;return}'
     + 'if(convScrolls()){log("official scroll layer already works");done=true;return}'
     + 'if(fix())done=true}'
     + 'run();'

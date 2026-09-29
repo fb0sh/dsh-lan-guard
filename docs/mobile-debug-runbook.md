@@ -7,17 +7,17 @@
 
 ```bash
 git clone https://github.com/idoall/dsh-lan-guard.git && cd dsh-lan-guard
-git checkout mobile-scroll-fix && git log --oneline -1
-# 期望：69a0287 fix: 0.4.3 补充 — 全屏视觉层放行触摸…
+git checkout mobile-scroll-fix && git log --oneline -3
+# 期望：含 0.4.4 的 fixClip 提交（release-notes/v0.4.4.md 存在）
 
 pnpm install && pnpm run verify
 # 期望：Tests 359 passed (359) + 4 次 Build complete
 
 dsh plugin --profile web add link:"$PWD"
-# 期望：列出的插件里有 dsh-lan-guard（版本 0.4.3）
+# 期望：列出的插件里有 dsh-lan-guard（版本 0.4.4）
 ```
 
-> ⚠️ 不要用 `dsh plugin add dsh-lan-guard@latest`：npm 上只有 0.4.1，没有本分支的修复。
+> ⚠️ **改完代码必须先 `pnpm run build` 再重启 dsh。** `link:` 安装下宿主只加载 `lib/`，而 `lib/` 被 `.gitignore` 忽略——git 操作不会重建它，重启前的旧构建会被**静默**加载（真机上表现为注入标记齐全、行为却像旧版）。自查一行：`curl -sk https://127.0.0.1:3081/ | grep -c touchPassThrough`，为 `0` 就说明跑的是没有本分支修复的旧产物。
 
 ```bash
 dsh web restart      # 或你的重启方式；等 10 秒
@@ -47,11 +47,12 @@ curl -sk https://127.0.0.1:3081/plugins/dsh-lan-guard/config | python3 -m json.t
 
 ## 第 3 关：诊断（两个入口，按顺序）
 
-**① 快速版**：地址加 `?lgdiag=1`，等 3 秒，绿字面板截图。重点两行：
+**① 快速版**：地址加 `?lgdiag=1`，等 3 秒，绿字面板截图。重点三行：
 
 ```
-official scroll layer already works   ← 官方滚动层可滚（触摸放行的前提）
-touch passthrough layers=N            ← 放行了几层（N≥1 才说明修复跑了）
+touch passthrough layers=N            ← 放行了几层（这一步有没有跑）
+clip grow layers=N max A->B           ← 补偿了几层被裁的层，可滚范围 A→B（B 应接近内容实际高度）
+official scroll layer already works   ← 官方滚动层可滚（也可能是「被裁层吃掉高度」的假象，必须看上一行）
 ```
 
 **② 精确版（强烈推荐）**：iPhone 用线连 MacBook →
@@ -87,6 +88,9 @@ return (s.position==='fixed'||s.position==='absolute')&&r.width>innerWidth*.9&&r
 | 现象 | 含义 | 下一步 |
 | --- | --- | --- |
 | lgdiag 无面板/无 `mobile-scroll` 标记 | 注入没生效 | 查第 0 关的 curl 输出与 patch 开关 |
+| 面板只有 `official scroll layer already works`，且拖不动/停不到最新 | 滚动层"按尺寸可滚"是可滚范围被内部裁剪层吃掉的假象 | 看 `clip grow` 那行；若为 0 或缺失，发 lgdiag 全屏 + ③的清单 |
+| `clip grow layers=N max A->B`，但 B 明显小于内容实际高度 | 还有别的层在裁 | 发该行 + ③的清单 + 内容最后一项的 rect |
+| 输入框不吸底 / 官方 ↓ 消失 | 补偿把 sticky 的参照改了（只改 `height` 或只改 `overflow` 都会） | 发 lgdiag 全屏 + 输入框与 ↓ 的 rect |
 | `passthrough layers=0` 且拖不动 | 放行没命中（层有交互后代/文本多） | 发③的清单，我放宽条件 |
 | ①里最上层 `peauto` 且不是按钮 | 还有别的层在拦 | 发整条链，我针对性放行 |
 | ②里 `clientH==scrollH` | 官方层没内容（高度链又断了） | 发 lgdiag 全屏，我查链 |
