@@ -409,10 +409,38 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('max-width: 1023px')
     expect(body).toContain('iPhone|iPad|iPod|Android')
     expect(body).toContain('clipping()')
-    expect(body).toContain('overflow-y')
-    expect(body).toContain('touch-action')
     // Diagnostic mode is opt-in per page load and never blocks the UI.
     expect(body).toContain('lgdiag')
+    // 0.4.3 strategy: fix the HEIGHT CHAIN (dsh-mobile's approach) instead of
+    // patching overflow on a content layer. The container the official code
+    // believes in must become the real scroller, or nothing is changed at all.
+    expect(body).toContain('min-height')
+    expect(body).toContain('100dvh')
+    expect(body).toContain('data-conversation-scroll')
+    expect(body).toContain('convScrolls')
+    // Failure must revert completely (page stays stock).
+    expect(body).toContain('removeProperty')
+    expect(body).toContain('ineffective -> reverted')
+    // Drawer/scrim safety (the 0.4.2 regression).
+    expect(body).toContain('overlayOpen')
+    expect(body).toContain('aria-modal=true')
+    // And it must NOT do the things that caused the reported regressions:
+    // Touch interception (decisive phone-side finding 2026-09-28): the official
+    // scroll layer IS scrollable, yet fingers cannot drag — fullscreen
+    // decorative layers swallow touches on iOS. Let pure containers through.
+    expect(body).toContain('touchPassThrough')
+    // It must run BEFORE the "official scroll layer already works" short-circuit:
+    // that state IS the "content visible, finger cannot drag" case, so returning
+    // first made touchPassThrough() unreachable and the runbook's `layers=N`
+    // line unprintable (regression guard, 2026-09-29).
+    expect(body).toContain(
+      'touchPassThrough();if(convScrolls()){log("official scroll layer already works")',
+    )
+    expect(body).toContain('pointer-events","none')
+    expect(body).toContain('querySelector("button,input,textarea,select,[contenteditable]")')
+    expect(body).not.toContain('overflow-y","auto')
+    expect(body).not.toContain('lg-to-bottom')
+    expect(body).not.toContain('-webkit-overflow-scrolling')
     expect(body).toContain('pointer-events:none')
     // Idempotent.
     expect(injectMobileScrollFix(out)).toBe(out)

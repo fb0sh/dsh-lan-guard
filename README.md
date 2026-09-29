@@ -163,7 +163,7 @@ Current version: plugin **`0.4.0`**; mobile long-connection self-healing — the
 | `0.1.1` | `0.1.7-rc.1` | Documentation release: bilingual user READMEs |
 | `0.1.0` | `0.1.7-rc.1` | First release: gated reverse proxy, self-signed HTTPS, device pairing, settings page, QR access |
 
-- Declared range `>=0.1.7-rc.1 <0.2.0` (`dsh.engines.dsh`); DSH versions not listed are **unverified** — verify them yourself before use.
+- Declared range `>=0.1.7-rc.1 <0.3.0` (`dsh.engines.dsh`); verified releases: `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`. DSH versions not listed are **unverified** — verify them yourself before use. The upper bound was widened from `<0.2.0` in `0.4.3` because profile load refuses a bundle whose range excludes the running release, and a plain `<0.2.0` would exclude the `0.2.0` stable.
 - Host/client interfaces this plugin uses: `webServer.register` / `webServer.tapIndex` (indexTaps), `connection.requestRejection`, `connection.authenticatedUrl`, the additive `settings.section` seat, `@deepseek-ai/schemastery`, and `profileContext` (for deriving the default data directory).
 - **Breaking default change (from `0.3.2`)**: `listenHost` now defaults to `0.0.0.0` instead of `127.0.0.1`, so one restart after install is enough; `0.3.1` and earlier default to loopback only. The gate and self-signed TLS defaults are unchanged (with no password the gate still refuses every device). See the [CHANGELOG](CHANGELOG.md).
 - **`0.4.0` verification status**: all three changes carry measurements, not just specs.
@@ -208,6 +208,8 @@ The official UI is reused with zero modifications and adapts on a phone viewport
 **Root cause (measured on the device viewport)**: on narrow screens DSH's own shell keeps the conversation in `pI_x6G_frame` with `overflow:hidden` while the content is taller — measured `clientHeight=844 / scrollHeight=1688` — and the page as a whole cannot scroll either (`pageScrolls=false`). The content is clipped, so it is visible but not draggable. The same viewport scrolls fine in desktop Chrome, so this is an iOS/narrow-screen layout difference, **not the reverse proxy** (all DOM/CSS comes from the official shell and the installed plugins).
 
 **Fix (`mobileScrollFix`, on by default)**: the injected script only acts when narrow screen AND mobile UA AND the page cannot scroll AND it actually finds a layer clipping overflowing content; it then makes exactly those layers touch-scrollable (`overflow-y:auto`, `-webkit-overflow-scrolling:touch`, `touch-action:pan-y`). Healthy pages are never touched.
+
+**"Back to bottom" button (from 0.4.2)**: on narrow screens the official button shows only when not at the tail, judged against the scroll layer the official code believes in — which is not the layer that actually scrolls, so it never appears. The gateway therefore ships an equivalent floating button (shown whenever the view is not at the bottom, smooth-scrolls on click, yields to the official button once that appears, and positions itself above the composer).
 
 **Self-check**: append `?lgdiag=1` to the page URL for an on-screen report (`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / patched`). That report is exactly the data that located this bug.
 

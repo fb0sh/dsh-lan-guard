@@ -110,10 +110,34 @@ export const MOBILE_SCROLL_MARKER = '/*dsh-lan-guard:mobile-scroll*/'
  *
  * @returns one inline `<script>` element.
  */
+/**
+ * 窄屏高度链修正（2026-09-28 第三次修订，照抄 dsh-mobile 的做法）。
+ *
+ * 事实（真机 + 官方源码 + 竞品对照）：
+ *
+ * - 官方外壳在窄屏 iOS 下把内容裁在 `pI_x6G_frame`（实测 clientH 844 /
+ *   scrollH 1688），而 conversation 认定的滚动层 `[data-conversation-scroll]`
+ *   始终 754/754：内容根本没进它的流。结果：手指拖不动、官方「回到底部」
+ *   按钮点了没反应、打开会话也不会自动停到最新消息。
+ * - dsh-mobile 能做对，靠的是**高度链**而不是滚动补丁：
+ *   `html,body,#root{height:100%;overflow:hidden}` +
+ *   shell `height:100dvh` + 主区 `min-height:0`（flex 子项允许收缩）。
+ *
+ * 因此本脚本只做同一件事，并且**绝不改任何 overflow-y、绝不新建滚动容器、
+ * 绝不加自己的按钮**：
+ *
+ * 1. 给 `html/body/#root` 一个确定高度（`100%`，支持时 `100dvh`）并锁住页面滚动；
+ * 2. 沿着「被裁且内容溢出」的那一层，给链上所有 flex/grid 容器补 `min-height:0`；
+ * 3. 立刻验证官方认定的滚动层是否真的能滚了：能 → 保留；不能 → **全部撤销**，
+ *    页面回到与官方逐字节一致的状态（宁可不动，也不引入第二个滚动层）。
+ *
+ * 抽屉/遮罩打开时同样先撤销自己（0.4.2 的遮罩事故教训）。
+ *
+ * @returns one inline `<script>` element.
+ */
 export function mobileScrollFixScript(): string {
   return `<script>${MOBILE_SCROLL_MARKER}(function(){try{`
-    + 'var diag=/[?&]lgdiag/.test(self.location.search);'
-    + 'var out=[];'
+    + 'var diag=/[?&]lgdiag/.test(self.location.search);var out=[];'
     + 'function log(s){out.push(s);if(diag)draw()}'
     + 'function draw(){try{var p=document.getElementById("lgsc");'
     + 'if(!p){p=document.createElement("pre");p.id="lgsc";p.style.cssText='
@@ -121,6 +145,12 @@ export function mobileScrollFixScript(): string {
     + 'color:#0f0;font:10px/1.3 monospace;padding:6px;margin:0;overflow:auto;white-space:pre-wrap;pointer-events:none";'
     + '(document.body||document.documentElement).appendChild(p)}'
     + 'p.textContent="[lan-guard 手机滚动诊断]"+String.fromCharCode(10)+out.join(String.fromCharCode(10))}catch(e){}}'
+    + 'var touched=[];'
+    + 'function set(el,prop,val){if(!el)return;try{el.style.setProperty(prop,val,"important");'
+    + 'touched.push([el,prop])}catch(e){}}'
+    + 'function undoAll(){for(var i=0;i<touched.length;i++){try{touched[i][0].style.removeProperty(touched[i][1])}catch(e){}}touched=[]}'
+    + 'function conv(){try{return document.querySelector("[data-conversation-scroll]")}catch(e){return null}}'
+    + 'function convScrolls(){var c=conv();return !!c&&c.scrollHeight>c.clientHeight+8}'
     + 'function pageScrolls(){var d=document.documentElement,b=document.body;'
     + 'return (d&&d.scrollHeight>d.clientHeight+8)||(b&&b.scrollHeight>b.clientHeight+8)}'
     + 'function clipping(){var r=[];var all=document.querySelectorAll("div");var lim=Math.min(all.length,5000);'
@@ -128,23 +158,59 @@ export function mobileScrollFixScript(): string {
     + 'if(cs.overflowY!=="hidden"&&cs.overflowY!=="clip")continue;'
     + 'if(el.clientHeight<150)continue;if(el.scrollHeight<=el.clientHeight+8)continue;r.push(el)}'
     + 'r.sort(function(a,b){return (b.scrollHeight-b.clientHeight)-(a.scrollHeight-a.clientHeight)});return r}'
-    + 'function run(){'
+    + 'function overlayOpen(){'
+    + 'try{if(document.querySelector("[aria-modal=true],[role=dialog],[data-conversation-overlay]"))return true;'
+    + 'var el=document.elementFromPoint(Math.round(innerWidth*0.92),Math.round(innerHeight*0.45));'
+    + 'while(el&&el!==document.body){var cs=getComputedStyle(el);'
+    + 'if((cs.position==="fixed"||cs.position==="absolute")&&cs.pointerEvents!=="none"){'
+    + 'var r=el.getBoundingClientRect();'
+    + 'if(r.width>innerWidth*0.85&&r.height>innerHeight*0.7)return true}'
+    + 'el=el.parentElement}}catch(e){}return false}'
+    + 'function touchPassThrough(){'
+    // iOS：pointer-events:auto 的全屏视觉层（布局的渐变/遮罩层）会吃掉触摸，
+    // 内容看得见却拖不动。只对"纯容器"放行：全屏、无按钮/输入、几乎无文本。
+    + 'var layers=document.querySelectorAll("div");var lim=Math.min(layers.length,5000);var n=0;'
+    + 'for(var i=0;i<lim;i++){var el=layers[i];var cs=getComputedStyle(el);'
+    + 'if(cs.position!=="fixed"&&cs.position!=="absolute")continue;'
+    + 'if(cs.pointerEvents==="none")continue;'
+    + 'var r=el.getBoundingClientRect();'
+    + 'if(r.width<innerWidth*0.9||r.height<innerHeight*0.8)continue;'
+    + 'if(el.querySelector("button,input,textarea,select,[contenteditable]"))continue;'
+    + 'if((el.textContent||"").length>40)continue;'
+    + 'el.style.setProperty("pointer-events","none","important");n++}'
+    + 'log("touch passthrough layers="+n);'
+    + 'return n}'
+    + 'function fix(){'
+    + 'if(convScrolls()){log("official scroll layer works; done");return true}'
+    + 'var list=clipping();var clip=list[0];'
+    + 'log("clipping="+list.length+(clip?(" first="+String(typeof clip.className==="string"?clip.className:"")+" "+clip.clientHeight+"/"+clip.scrollHeight):""));'
+    + 'var root=document.getElementById("root");'
+    + 'set(document.documentElement,"height","100%");'
+    + 'set(document.body,"height","100%");set(document.body,"overflow","hidden");'
+    + 'set(root,"height","100dvh");set(root,"min-height","0");set(root,"overflow","hidden");'
+    + 'var n=clip,d=0;'
+    + 'while(n&&n!==document.body&&d<8){var cs=getComputedStyle(n);'
+    + 'if(cs.display.indexOf("flex")>=0||cs.display.indexOf("grid")>=0)set(n,"min-height","0");'
+    + 'n=n.parentElement;d++}'
+    + 'var ok=convScrolls();'
+    + 'log("chainFix convScroll="+(conv()?(conv().clientHeight+"/"+conv().scrollHeight):"n/a")+" scrollable="+ok);'
+    + 'if(!ok){undoAll();log("ineffective -> reverted (stock page)")}'
+    + 'return ok}'
+    + 'var done=false,tries=0;'
+    + 'function run(){if(done)return;'
     + 'var narrow=self.matchMedia?self.matchMedia("(max-width: 1023px)").matches:false;'
     + 'var mobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||"");'
     + 'log("narrow="+narrow+" mobile="+mobile+" innerH="+innerHeight+" vv="+(self.visualViewport?self.visualViewport.height:"-")+" pageScrolls="+pageScrolls());'
-    + 'if(!narrow||!mobile)return;'
-    + 'if(pageScrolls()){log("page already scrolls; no patch");return}'
-    + 'var list=clipping();'
-    + 'log("clippingLayers="+list.length);'
-    + 'for(var i=0;i<list.length&&i<3;i++){var el=list[i];var cls=typeof el.className==="string"?el.className:"";'
-    + 'log("  C"+i+" "+cls+" "+el.clientHeight+"/"+el.scrollHeight);'
-    + 'el.style.setProperty("overflow-y","auto","important");'
-    + 'el.style.setProperty("-webkit-overflow-scrolling","touch");'
-    + 'el.style.setProperty("touch-action","pan-y","important");'
-    + 'log("  C"+i+" patched -> scrollable="+(el.scrollHeight>el.clientHeight+8));}'
-    + '}'
-    + 'var tries=0;run();'
-    + 'var t=setInterval(function(){tries++;run();if(tries>15)clearInterval(t)},1200);'
+    + 'if(!narrow||!mobile){done=true;return}'
+    + 'if(overlayOpen()){undoAll();log("overlay/dialog open -> reverted");return}'
+    // 放行必须发生在 convScrolls() 短路之前：官方滚动层"按尺寸可滚"正是
+    // "内容看得见却拖不动"的场景（触摸被全屏视觉层吃掉），此时若直接 return，
+    // touchPassThrough() 就永远不会执行，Runbook 期望的 layers=N 也打不出来。
+    + 'touchPassThrough();'
+    + 'if(convScrolls()){log("official scroll layer already works");done=true;return}'
+    + 'if(fix())done=true}'
+    + 'run();'
+    + 'var t=setInterval(function(){tries++;run();if(done||tries>30)clearInterval(t)},1500);'
     + '}catch(e){}})()</script>'
 }
 

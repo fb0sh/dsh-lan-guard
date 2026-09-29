@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.4.3] — 2026-09-28（改用 dsh-mobile 式「高度链」修正，移除自建补丁）
+
+### 方向修正 — 不再给内容层打 overflow 补丁
+
+**对照实验（用户实测）**：3080 直连（本插件注入不生效）**能正常拖动**；3081 经代理（注入生效）**拖不动**；而 dsh-mobile 在**同一套官方 UI、同一台手机**上可用。
+
+**dsh-mobile 的做法是移动端「高度链」**（`src/mobile-layout.ts`）：
+
+```css
+html, body, #root { height:100%; overflow:hidden }
+.dshm-shell { height:100dvh }   /* dvh，不是 vh */
+.dshm-main  { min-height:0 }    /* flex/grid 子项允许收缩 */
+```
+
+**根因**：官方外壳在窄屏 iOS 下高度链断裂——实测内容 1688 被裁在 844 的层里，而官方认定的滚动层 `[data-conversation-scroll]` 永远 754/754（内容没进它的流）。后果：手指拖不动、官方「回到底部」点了没反应、**打开会话也不会停在最新消息**。0.4.1/0.4.2 给内容层打 `overflow-y:auto !important` 是治标，并引发了白屏与抽屉遮罩两个副作用。
+
+**0.4.3 的做法**（`mobileScrollFix`）：
+
+1. 给 `html/body/#root` 一个确定高度（`100%`，支持时 `100dvh`）并锁住页面滚动；
+2. 沿「被裁且内容溢出」的那一层，给链上所有 flex/grid 容器补 `min-height:0`；
+3. **立刻验证**官方认定的滚动层是否真的能滚：能 → 保留；**不能 → 全部撤销**，页面回到与官方逐字节一致（宁可不动，也不引入第二个滚动层）；
+4. 遮罩/对话框打开时同样先撤销（0.4.2 遮罩事故的教训）。
+
+**移除**：自建「回到底部」按钮（官方按钮恢复工作，且打开会话会自动停在最新）、内容层 `overflow-y`/`touch-action` 补丁、`-webkit-overflow-scrolling`。
+
+### 补充（同日真机诊断后）— 触摸放行
+
+真机 `?lgdiag=1` 的决定性数据：`official scroll layer already works`——官方滚动层**是可滚的**，但手指拖不动。结论：**触摸被全屏视觉层吃掉**（`pI_x6G_overlayLayer` / `dsh-sc-layer` 这类 `position:absolute/fixed` 的全屏层，在 iOS 上 `pointer-events:auto` 会拦截触摸；桌面 Chrome 的滚轮走另一条路径，所以本地一直"能拖"）。
+
+新增 `touchPassThrough()`：只对**纯视觉容器**放行触摸（全屏覆盖、`pointer-events` 非 none、不含 button/input/textarea/select/[contenteditable]、文本 <40 字符），设 `pointer-events:none !important`；真正的交互层一律不碰。
+
+### 兼容性声明 — DSH 0.2.0-rc.1
+
+- `dsh.engines.dsh`、`peerDependencies['@deepseek-ai/dsh-client-connection']` 与 `peerDependencies['@deepseek-ai/dsh-host-webserver']` 的上界由 `<0.2.0` 放宽为 `<0.3.0`，`dsh.compatibility.dshReleases` 新增 `0.2.0-rc.1: compatible`。旧上界是一颗定时炸弹：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 DSH `0.2.0` 正式版——正式版发布当天本插件会被静默丢弃。
+- 依据：本插件正以 link 方式运行在当前 DSH `0.2.0-rc.1` profile 中（无 skipping 警告）；`dsh.client.inject` 涉及的宿主包（`dsh-client-ui-renderer`、`dsh-client-ui-layout`、`dsh-client-ui-settings(-general)`）与 peer 包（`dsh-client-connection`、`dsh-host-webserver`）在 `dsh-v0.1.7-rc.2` → `dsh-v0.2.0-rc.1` 之间仅有版本号改动，本插件用到的接口面（`webServer.register` / `tapIndex`、`connection.requestRejection`、`connection.authenticatedUrl`、`settings.section` seat）无一变化。仅声明，零代码。
+
+### 升级
+
+```sh
+dsh plugin --profile web add dsh-lan-guard@latest
+```
+
+重启一次 dsh 生效。
+
+## [0.4.2] — 2026-09-28（手机端补上「回到底部」按钮）
+
+### 修复 — 手机上滚动到中间时没有回到底部的按钮
+
+**症状**（2026-09-28 用户报告）：0.4.1 之后手机已经能滚动、也能看到最新内容，但**滚到消息中间时右下角没有「回到底部」的下箭头**，只能手动往回滑。
+
+**根因（官方源码 + 真机视口诊断）**：官方自带这个按钮（`chat.toBottom`），显示条件是「不在尾部」（`!scroll.followingTail`），而这个判断基于官方认定的滚动层。窄屏下官方布局（`dsh-client-ui-layout` 的 `pI_x6G_frame`）承担了实际滚动，而 conversation 的 `[data-conversation-scroll]` 层内容高度并没有跟着涨——实测 `convScroll 754/754`，同时 `pI_x6G_frame 844/1688`。两边不一致 → 官方永远以为还在尾部 → 按钮不出现。
+
+**改动**（并入 `mobileScrollFix`，窄屏 + 移动端生效）：网关侧自带一个「回到底部」按钮：
+- 不依赖官方内部状态：每次滚动/尺寸变化后，找出**当前真正在滚动的容器**（滚动量最大且可见者），不在尾部时显示 36px 圆形浮动按钮，点击平滑滚到底；
+- **自动避让**：一旦检测到官方按钮（`aria-label` 含「底部」或 `bottom`）出现，自己的按钮立即移除，不会出现两个；
+- **自动避开输入框**：按输入框位置动态计算按钮的 `bottom`（键盘弹出、快捷回复展开时不会压住输入区）。
+
+### 修复 — 打开左侧边栏被遮罩盖住（0.4.2 内的回归修复）
+
+**症状**：0.4.2 的滚动矫正上线后，手机上打开左侧边栏会被一层灰雾盖住、点不动。
+**根因（用户 A/B 实测确认）**：矫正给内容滚动层加了 `overflow-y:auto !important`（以及 `-webkit-overflow-scrolling:touch`），与官方抽屉打开时的滚动锁定/层级互相打架；把 `mobileScrollFix` 关掉即恢复正常。
+**改动**：检测到全屏遮罩/对话框（`[aria-modal=true]` / `[role=dialog]` / `[data-conversation-overlay]`，或命中点上方有覆盖 ≥85% 视口的定位层）时，**完全撤销**自己加过的样式并隐藏自己的按钮，把页面还给官方；抽屉关闭后再应用。同时**去掉 `-webkit-overflow-scrolling`**（iOS 会为它强制合成层，正是层级错乱的来源）。
+
+### 升级
+
+```sh
+dsh plugin --profile web add dsh-lan-guard@latest
+```
+
+重启一次 dsh 生效。
+
 ## [0.4.1] — 2026-09-28（修掉手机端「聊天区滑不动」）
 
 ### 修复 — 手机上会话内容可见但无法上下滑动

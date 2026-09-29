@@ -163,7 +163,7 @@ dsh plugin --profile web add "link:$(pwd)"
 | `0.1.1` | `0.1.7-rc.1` | 文档版：中英双语用户 README |
 | `0.1.0` | `0.1.7-rc.1` | 首个版本：门禁反向代理、自签 HTTPS、设备配对、设置页、扫码访问 |
 
-- 声明范围 `>=0.1.7-rc.1 <0.2.0`（`dsh.engines.dsh`）；未列入的 DSH 版本属**未验证**，请自行验证后再使用。
+- 声明范围 `>=0.1.7-rc.1 <0.3.0`（`dsh.engines.dsh`）；已验证版本：`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`。未列入的 DSH 版本属**未验证**，请自行验证后再使用。上界在 `0.4.3` 从 `<0.2.0` 放宽：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 `0.2.0` 正式版。
 - 本插件用到的宿主/客户端接口：`webServer.register` / `webServer.tapIndex`（indexTaps）、`connection.requestRejection`、`connection.authenticatedUrl`、追加型 `settings.section` seat、`@deepseek-ai/schemastery`，以及 `profileContext`（用于推导默认数据目录）。
 - **破坏性默认值变更（`0.3.2` 起）**：`listenHost` 默认由 `127.0.0.1` 改为 `0.0.0.0`，装完重启一次即可用；`0.3.1` 及更早默认仅回环。门禁与自签 TLS 的默认值未变（未设密码仍拒绝所有设备）。详见 [CHANGELOG](CHANGELOG.md)。
 - **`0.4.0` 的验证状态**：三处改动都做了实测，不只跑用例。
@@ -208,6 +208,8 @@ dsh plugin --profile web add "link:$(pwd)"
 **根因（真机视口实测）**：DSH 官方外壳在**窄屏**下的根层 `pI_x6G_frame` 是 `overflow:hidden`，而内容高于它——实测 `clientHeight=844 / scrollHeight=1688`，同时**整页也不可滚**（`pageScrolls=false`）。内容被裁在容器里，所以"看得见、滑不动"。同一视口在桌面 Chrome 上正常，因此这是 iOS/窄屏的布局差异，**与反向代理无关**（DOM/CSS 全部来自官方 UI 与已装插件）。
 
 **修复（`mobileScrollFix`，默认开）**：注入脚本**只在四条同时成立时**才动手——窄屏（≤1023px）、移动端 UA、**整页不可滚**、且**确实找到被裁剪且内容溢出的层**；然后只把那几层改成可触摸滚动（`overflow-y:auto`、`-webkit-overflow-scrolling:touch`、`touch-action:pan-y`）。能正常滚动的页面一律不碰。
+
+**「回到底部」按钮（0.4.2 起）**：窄屏下官方按钮的显示条件是「不在尾部」，而它判断的是官方认定的滚动层，与实际滚动层不一致，于是永远不出现；网关侧因此自带一个等价的浮动按钮（不在尾部时显示、点击平滑到底、官方按钮出现即让位、位置按输入框动态计算）。
 
 **自检**：在页面地址后加 `?lgdiag=1`，顶部会出现一屏诊断（`narrow / mobile / innerHeight / visualViewport / pageScrolls / clippingLayers / 是否已修`）。这一屏就是本次定位所用的数据，以后复现同类问题不必连 Mac 调试。
 
