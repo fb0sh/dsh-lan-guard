@@ -434,6 +434,11 @@ describe('injectMobileScrollFix', () => {
     // case, so returning first made them unreachable and the runbook's
     // `layers=N` line unprintable (regression guard, 2026-09-29).
     expect(body).toContain('touchPassThrough();if(fixClip())')
+    // A long transcript can mount after the official scroller first becomes
+    // nominally scrollable. That intermediate state must not end polling before
+    // a late overflow:hidden child can be released.
+    expect(body).toContain('official scroll layer works; waiting for late clip')
+    expect(body).not.toContain('official scroll layer already works");done=true')
     // DSH 0.2.0-rc.1 regression: the official scroller's own content is clipped
     // by an inner overflow:hidden layer — measured on the phone, 21083px of
     // content yielded only a 336px scroll range. Grow that inner layer AND stop
