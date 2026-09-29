@@ -436,12 +436,15 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('touchPassThrough();if(fixClip())')
     // DSH 0.2.0-rc.1 regression: the official scroller's own content is clipped
     // by an inner overflow:hidden layer — measured on the phone, 21083px of
-    // content yielded only a 336px scroll range. Release inner clip layers only
-    // (never anything outside the scroller), and revert wholesale when that
-    // does not actually widen the range.
-    expect(body).toContain('clip release layers=')
-    expect(body).toContain('clip release ineffective -> reverted')
+    // content yielded only a 336px scroll range. Let that inner layer GROW
+    // (height:auto, overflow untouched): forcing overflow:visible also restores
+    // the range but paints content over the composer and breaks the sticky seat
+    // (measured: seat top 743 → -9084 mid-scroll). Only ever touch layers inside
+    // the scroller, and revert wholesale when the range does not widen.
+    expect(body).toContain('clip grow layers=')
+    expect(body).toContain('clip grow ineffective -> reverted')
     expect(body).toContain('c.contains(list[i])')
+    expect(body).toContain('set(list[i],"height","auto")')
     expect(body).toContain('pointer-events","none')
     expect(body).toContain('querySelector("button,input,textarea,select,[contenteditable]")')
     expect(body).not.toContain('overflow-y","auto')

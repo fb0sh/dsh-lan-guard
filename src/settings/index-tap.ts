@@ -182,17 +182,21 @@ export function mobileScrollFixScript(): string {
     + 'return n}'
     // DSH 0.2.0-rc.1 回归：会话内容被官方滚动层**内部**某个 overflow:hidden/clip
     // 的层裁掉，高度传不上去（真机实测：21083px 的内容只换来 336px 可滚范围），
-    // 于是"打开会话停不到最新消息、手指也拖不动"。这里只放行滚动层内部的裁剪层，
-    // 绝不新建滚动容器；放行后以"可滚范围是否真的变大"自检，无效立即整体回退。
+    // 于是"打开会话停不到最新消息、手指也拖不动"。
+    // 修法：让那一层**长高**（height:auto；overflow 保持 hidden），高度自然回流到
+    // 官方滚动层。实测对照：改成 overflow:visible 虽然同样恢复可滚范围，却会让内容
+    // 溢出绘制、把 sticky 的输入框顶走（滚动中 seat 位置从 743 掉到 -9084）；
+    // height:auto 时输入框始终吸底（743/935 不随滚动变化）。
+    // 绝不新建滚动容器、绝不动滚动层以外的层；以"可滚范围是否真的变大"自检，无效整体回退。
     + 'function fixClip(){'
     + 'var c=conv();if(!c)return false;'
     + 'var list=clipping();var before=c.scrollHeight-c.clientHeight;var n=0;'
     + 'for(var i=0;i<list.length;i++){if(!c.contains(list[i]))continue;'
-    + 'set(list[i],"overflow","visible");n++}'
+    + 'set(list[i],"height","auto");n++}'
     + 'if(!n)return false;'
     + 'var after=c.scrollHeight-c.clientHeight;'
-    + 'log("clip release layers="+n+" max "+before+"->"+after);'
-    + 'if(after<=before+8){undoAll();log("clip release ineffective -> reverted");return false}'
+    + 'log("clip grow layers="+n+" max "+before+"->"+after);'
+    + 'if(after<=before+8){undoAll();log("clip grow ineffective -> reverted");return false}'
     + 'return true}'
     + 'function fix(){'
     + 'if(convScrolls()){log("official scroll layer works; done");return true}'
