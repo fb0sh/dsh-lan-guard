@@ -425,6 +425,12 @@ describe('injectMobileScrollFix', () => {
     expect(body).toContain('overlayOpen')
     expect(body).toContain('aria-modal=true')
     // And it must NOT do the things that caused the reported regressions:
+    // Touch interception (decisive phone-side finding 2026-09-28): the official
+    // scroll layer IS scrollable, yet fingers cannot drag — fullscreen
+    // decorative layers swallow touches on iOS. Let pure containers through.
+    expect(body).toContain('touchPassThrough')
+    expect(body).toContain('pointer-events","none')
+    expect(body).toContain('querySelector("button,input,textarea,select,[contenteditable]")')
     expect(body).not.toContain('overflow-y","auto')
     expect(body).not.toContain('lg-to-bottom')
     expect(body).not.toContain('-webkit-overflow-scrolling')

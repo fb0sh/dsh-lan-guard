@@ -25,6 +25,12 @@ html, body, #root { height:100%; overflow:hidden }
 
 **移除**：自建「回到底部」按钮（官方按钮恢复工作，且打开会话会自动停在最新）、内容层 `overflow-y`/`touch-action` 补丁、`-webkit-overflow-scrolling`。
 
+### 补充（同日真机诊断后）— 触摸放行
+
+真机 `?lgdiag=1` 的决定性数据：`official scroll layer already works`——官方滚动层**是可滚的**，但手指拖不动。结论：**触摸被全屏视觉层吃掉**（`pI_x6G_overlayLayer` / `dsh-sc-layer` 这类 `position:absolute/fixed` 的全屏层，在 iOS 上 `pointer-events:auto` 会拦截触摸；桌面 Chrome 的滚轮走另一条路径，所以本地一直"能拖"）。
+
+新增 `touchPassThrough()`：只对**纯视觉容器**放行触摸（全屏覆盖、`pointer-events` 非 none、不含 button/input/textarea/select/[contenteditable]、文本 <40 字符），设 `pointer-events:none !important`；真正的交互层一律不碰。
+
 ### 升级
 
 ```sh
