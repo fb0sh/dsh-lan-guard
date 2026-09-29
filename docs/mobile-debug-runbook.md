@@ -52,7 +52,7 @@ curl -sk https://127.0.0.1:3081/plugins/dsh-lan-guard/config | python3 -m json.t
 ```
 touch passthrough layers=N            ← 放行了几层（这一步有没有跑）
 clip grow layers=N max A->B           ← 补偿了几层被裁的层，可滚范围 A→B（B 应接近内容实际高度）
-official scroll layer already works   ← 官方滚动层可滚（也可能是「被裁层吃掉高度」的假象，必须看上一行）
+official scroll layer works; waiting for late clip   ← 官方滚动层暂时可滚，仍在等后挂载的正文（0.4.5 起；旧版本此处是 already works 并直接收工）
 ```
 
 **② 精确版（强烈推荐）**：iPhone 用线连 MacBook →
@@ -88,7 +88,7 @@ return (s.position==='fixed'||s.position==='absolute')&&r.width>innerWidth*.9&&r
 | 现象 | 含义 | 下一步 |
 | --- | --- | --- |
 | lgdiag 无面板/无 `mobile-scroll` 标记 | 注入没生效 | 查第 0 关的 curl 输出与 patch 开关 |
-| 面板只有 `official scroll layer already works`，且拖不动/停不到最新 | 滚动层"按尺寸可滚"是可滚范围被内部裁剪层吃掉的假象 | 看 `clip grow` 那行；若为 0 或缺失，发 lgdiag 全屏 + ③的清单 |
+| 面板只有 `official scroll layer works; waiting for late clip`，且拖不动/停不到最新 | 滚动层"按尺寸可滚"是可滚范围被内部裁剪层吃掉的假象（0.4.5 起它不再直接收工，会继续等到约 45s） | 看 `clip grow` 那行；若为 0 或缺失，发 lgdiag 全屏 + ③的清单 |
 | `clip grow layers=N max A->B`，但 B 明显小于内容实际高度 | 还有别的层在裁 | 发该行 + ③的清单 + 内容最后一项的 rect |
 | 输入框不吸底 / 官方 ↓ 消失 | 补偿把 sticky 的参照改了（只改 `height` 或只改 `overflow` 都会） | 发 lgdiag 全屏 + 输入框与 ↓ 的 rect |
 | `passthrough layers=0` 且拖不动 | 放行没命中（层有交互后代/文本多） | 发③的清单，我放宽条件 |
