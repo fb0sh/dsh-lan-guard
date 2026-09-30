@@ -6,7 +6,7 @@
   <a href="https://github.com/idoall/dsh-lan-guard/actions/workflows/ci.yml"><img src="https://github.com/idoall/dsh-lan-guard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-lan-guard"><img src="https://img.shields.io/npm/v/dsh-lan-guard?label=npm&color=CB3837" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0F172A" alt="MIT"></a>
-  <img src="https://img.shields.io/badge/DSH-0.1.7--rc.2-4B6BFB" alt="DSH 0.1.7-rc.2">
+  <img src="https://img.shields.io/badge/DSH-0.2.0--rc.2-4B6BFB" alt="DSH 0.2.0-rc.2">
 </p>
 
 <p align="center">English | <a href="README.zh.md">中文</a></p>
@@ -49,7 +49,7 @@ Requirements:
 
 - DeepSeek Harness with a Web profile
 - Node.js 20 or newer
-- Verified DeepSeek Harness: `0.1.7-rc.2`
+- Verified DeepSeek Harness: `0.2.0-rc.2`
 
 Install from npm:
 
@@ -147,10 +147,11 @@ The plugin reads its config from its Cordis entry. **Every key has a usable defa
 
 ## Compatibility
 
-Current version: plugin **`0.4.5`**; the mobile clip compensation no longer gives up while a long transcript is still hydrating, so a late `overflow:hidden` layer is released too (verified on DeepSeek Harness **`0.2.0-rc.1`**, `0.1.7-rc.2`).
+Current version: plugin **`0.4.6`**; compatible with DeepSeek Harness **`0.2.0-rc.2`** (declaration only, zero code) — that release fixed the `0.2.0-rc.1` transcript-clipping regression, so the mobile clip compensation no longer engages (it stays for older releases).
 
 | Plugin | Verified DeepSeek Harness | What this version is |
 | --- | --- | --- |
+| **`0.4.6`** | **`0.2.0-rc.2`**, **`0.2.0-rc.1`**, `0.1.7-rc.2` | Verification release for `0.2.0-rc.2`: zero code changes, compatibility metadata only (`dsh.compatibility.dshReleases` gains `0.2.0-rc.2`), plus both host devDependencies raised to `0.2.0-rc.2` and the type check and full suite re-run. Upstream changed only version numbers between `rc.1` and `rc.2` (the sole source edit is a hooks-ordering fix in `ui-renderer`, unrelated to this plugin), so the plugin runs on `rc.2` unchanged; measurements also confirm the mobile clip compensation now has nothing to act on (clipped layers 1 → **0**, scroll range 336px → **92343px**; every polling round reverts wholesale and writes no inline style) |
 | **`0.4.5`** | **`0.2.0-rc.1`**, `0.1.7-rc.2` | Long transcripts hydrate after the official scroller has already picked up a small scroll range; the mobile clip compensation treated that intermediate state as healthy and stopped, so a late `overflow:hidden` layer was never released (measured on device: 336px of scroll range with 1 clipped layer inside the scroller). It now keeps looking inside the existing polling window and releases the late layer — 336px → 6889px, 1 clipped layer → 0, official "back to bottom" still on screen |
 | **`0.4.4`** | **`0.2.0-rc.1`**, `0.1.7-rc.2` | iOS session scrolling on DSH `0.2.0-rc.1`: an inner `overflow:hidden` layer with a locked height clipped the conversation (measured on device: 21083px of content behind a 336px scroll range), so a session did not open at the newest message and barely dragged. `mobileScrollFix` now grows that inner layer and drops its scroll-container role, restoring 20675px — verified on device with the composer still pinned and the official "back to bottom" button back in place |
 | **`0.4.3`** | **`0.2.0-rc.1`**, `0.1.7-rc.2`, `0.1.7-rc.1` | Direction change: fix the mobile **height chain** instead of patching `overflow` — a definite height for `html/body/#root`, `100dvh` on the shell and `min-height:0` along the clipping chain, self-checked and reverted wholesale when the official scroll layer still does not scroll; removes the self-made "back to bottom" button and every `overflow-y`/`-webkit-overflow-scrolling` patch; declares DSH `0.2.0-rc.1` and widens the `dsh`/peer ranges to `<0.3.0` |
@@ -168,7 +169,7 @@ Current version: plugin **`0.4.5`**; the mobile clip compensation no longer give
 | `0.1.1` | `0.1.7-rc.1` | Documentation release: bilingual user READMEs |
 | `0.1.0` | `0.1.7-rc.1` | First release: gated reverse proxy, self-signed HTTPS, device pairing, settings page, QR access |
 
-- Declared range `>=0.1.7-rc.1 <0.3.0` (`dsh.engines.dsh`); verified releases: `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`. DSH versions not listed are **unverified** — verify them yourself before use. The upper bound was widened from `<0.2.0` in `0.4.3` because profile load refuses a bundle whose range excludes the running release, and a plain `<0.2.0` would exclude the `0.2.0` stable.
+- Declared range `>=0.1.7-rc.1 <0.3.0` (`dsh.engines.dsh`); verified releases: `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`, `0.2.0-rc.2`. DSH versions not listed are **unverified** — verify them yourself before use. The upper bound was widened from `<0.2.0` in `0.4.3` because profile load refuses a bundle whose range excludes the running release, and a plain `<0.2.0` would exclude the `0.2.0` stable.
 - Host/client interfaces this plugin uses: `webServer.register` / `webServer.tapIndex` (indexTaps), `connection.requestRejection`, `connection.authenticatedUrl`, the additive `settings.section` seat, `@deepseek-ai/schemastery`, and `profileContext` (for deriving the default data directory).
 - **Breaking default change (from `0.3.2`)**: `listenHost` now defaults to `0.0.0.0` instead of `127.0.0.1`, so one restart after install is enough; `0.3.1` and earlier default to loopback only. The gate and self-signed TLS defaults are unchanged (with no password the gate still refuses every device). See the [CHANGELOG](CHANGELOG.md).
 - **`0.4.0` verification status**: all three changes carry measurements, not just specs.

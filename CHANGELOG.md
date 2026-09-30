@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.6] — 2026-10-01（兼容 DeepSeek Harness `0.2.0-rc.2`）
+
+**结论：仅声明，零代码。** `0.2.0-rc.1 → 0.2.0-rc.2` 之间，本插件用到的宿主接口面没有发生任何变化：
+
+| 本插件用到的接口 | `0.2.0-rc.2` 状态 |
+| --- | --- |
+| `webServer.register(route)` / `webServer.tapIndex(transform)` | 签名不变 |
+| `connection.authenticatedUrl(baseUrl)` / `connection.requestRejection(request)` | 签名不变 |
+| `slots.inject` / `slots.register`、`settings.section` seat | 不变 |
+
+**依据**：上游 `0.2.0-rc.1..0.2.0-rc.2` 的 diff 中，`packages/host/webserver`、`packages/client/connection`、`packages/client/ui-slots`、`packages/client/ui-settings`、`packages/client/ui-layout` **只有 `package.json` 里的版本号改动**；唯一一处源码改动在 `packages/client/ui-renderer/src/client/scoped-slots.tsx`（把 `nextAncestors` 提到 `useMemo` 里，修 React hooks 调用顺序），与本插件无关。`devDependencies` 里的两个宿主包已升到 `0.2.0-rc.2`，类型检查与 **359** 个用例全部通过。
+
+**移动端裁剪补偿在 `0.2.0-rc.2` 上不再介入**：`0.2.0-rc.1` 那个「官方滚动层内部有一层 `overflow:hidden` 且高度被锁死」的回归已被上游修掉。
+
+| | `0.2.0-rc.1`（0.4.4/0.4.5 实测） | `0.2.0-rc.2`（本次实测） |
+| --- | --- | --- |
+| 滚动层内部被裁的层 | 1（`EvIC1a_frame`，796 高） | **0** |
+| 官方滚动层 client / scroll | 668 / 1004 | 736 / 93079 |
+| 可滚范围 | **336px** | **92343px** |
+
+`?lgdiag=1` 的诊断日志同步印证：补偿脚本的每一轮都落在 `clipping=0` → `ineffective -> reverted (stock page)` 或 `official scroll layer works`，**从不写入任何内联样式**（`html` 上只剩 `color-scheme`，`#root` 为空）。因此 `mobileScrollFix` 保留、默认仍开：它在 `0.2.0-rc.2` 上零副作用，在 `0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1` 上仍是必需的。
+
+**窄屏右侧栏在 `0.2.0-rc.2` 上验证正常**（iPhone 视口 390×844）：点会话头部的「展开右侧栏」后按钮消失、面板铺满视口，可见面积 **100%**、屏幕正中命中面板内部；`http://127.0.0.1:3080/` 直连与经代理的 `https://<主机>:3081/` 逐项一致。
+
 ## [0.4.5] — 2026-09-29（长会话延迟挂载时，裁剪补偿不再提前收工）
 
 **现象**：0.4.4 之后，部分长会话在手机上依旧「只有一小段、拖不到底」，而同一条会话在宽屏/桌面完全正常。

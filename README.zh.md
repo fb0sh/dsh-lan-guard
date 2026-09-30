@@ -6,7 +6,7 @@
   <a href="https://github.com/idoall/dsh-lan-guard/actions/workflows/ci.yml"><img src="https://github.com/idoall/dsh-lan-guard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-lan-guard"><img src="https://img.shields.io/npm/v/dsh-lan-guard?label=npm&color=CB3837" alt="npm 版本"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0F172A" alt="MIT"></a>
-  <img src="https://img.shields.io/badge/DSH-0.1.7--rc.2-4B6BFB" alt="DSH 0.1.7-rc.2">
+  <img src="https://img.shields.io/badge/DSH-0.2.0--rc.2-4B6BFB" alt="DSH 0.2.0-rc.2">
 </p>
 
 <p align="center"><a href="README.md">English</a> | 中文</p>
@@ -49,7 +49,7 @@ DSH 的 Web 界面只监听 `127.0.0.1`，而官方明确拒绝绑定 `0.0.0.0`�
 
 - 带 Web profile 的 DeepSeek Harness
 - Node.js 20 或更新
-- 已验证的 DeepSeek Harness：`0.1.7-rc.2`
+- 已验证的 DeepSeek Harness：`0.2.0-rc.2`
 
 从 npm 安装：
 
@@ -147,10 +147,11 @@ dsh plugin --profile web add "link:$(pwd)"
 
 ## 兼容性
 
-当前版本：插件 **`0.4.5`**；长会话正文后挂载时，移动端裁剪补偿不再提前收工，晚出现的 `overflow:hidden` 层同样会被放行（已在 DeepSeek Harness **`0.2.0-rc.1`**、`0.1.7-rc.2` 上验证）。
+当前版本：插件 **`0.4.6`**；兼容 DeepSeek Harness **`0.2.0-rc.2`**（仅声明，零代码）——该版本修掉了 `0.2.0-rc.1` 的会话裁剪回归，移动端裁剪补偿因此不再介入（保留以兼容旧版本）。
 
 | 插件 | 已验证的 DeepSeek Harness | 这个版本是什么 |
 | --- | --- | --- |
+| **`0.4.6`** | **`0.2.0-rc.2`**、**`0.2.0-rc.1`**、`0.1.7-rc.2` | 针对 `0.2.0-rc.2` 的验证版：代码零改动，只更新兼容元数据（`dsh.compatibility.dshReleases` 补 `0.2.0-rc.2`），并把两个宿主 devDependency 升到 `0.2.0-rc.2` 后重跑类型检查与全部用例。上游在 `rc.1 → rc.2` 之间只动了版本号（唯一源码改动是 `ui-renderer` 的 hooks 顺序修复，与本插件无关），因此本插件在 `rc.2` 上零改动可用；同时实测确认移动端裁剪补偿在 `rc.2` 上已无作用对象（被裁层 1 → **0**，可滚范围 336px → **92343px**，脚本每轮自检后整体撤销、不写任何内联样式） |
 | **`0.4.5`** | **`0.2.0-rc.1`**、`0.1.7-rc.2` | 长会话的正文是在官方滚动层拿到少量可滚范围**之后**才挂载的，旧逻辑把这个中间态当成「已正常」收工，晚出现的 `overflow:hidden` 层再也没人放行（真机实测：可滚范围 336px、滚动层内部仍有 1 层被裁）。现在改为在既有轮询窗口内继续侦测并放行迟到的裁剪层：可滚范围 336px → 6889px，被裁层 1 → 0，官方「回到底部」仍在屏内 |
 | **`0.4.4`** | **`0.2.0-rc.1`**、`0.1.7-rc.2` | 修好 DSH `0.2.0-rc.1` 上的 iOS 会话滚动：官方滚动层内部有一层 `overflow:hidden` 且高度锁死，把会话内容裁掉（真机实测：21083px 的内容只换来 336px 可滚范围），表现为打开会话不在最新、手指几乎拖不动。`mobileScrollFix` 现在让该层长高并脱离滚动容器身份，可滚范围恢复到 20675px；真机验收同时确认输入框仍吸底、官方「回到底部」按钮回到原位 |
 | **`0.4.3`** | **`0.2.0-rc.1`**、`0.1.7-rc.2`、`0.1.7-rc.1` | 方向修正：不再给内容层打 `overflow` 补丁，改修移动端**高度链**——给 `html/body/#root` 确定高度、shell 用 `100dvh`、沿被裁层补 `min-height:0`，并自检「官方滚动层真的能滚」否则整体回退；移除自建「回到底部」按钮与全部 `overflow-y`/`-webkit-overflow-scrolling` 补丁；声明 DSH `0.2.0-rc.1` 并把 `dsh`/peer 范围放宽到 `<0.3.0` |
@@ -168,7 +169,7 @@ dsh plugin --profile web add "link:$(pwd)"
 | `0.1.1` | `0.1.7-rc.1` | 文档版：中英双语用户 README |
 | `0.1.0` | `0.1.7-rc.1` | 首个版本：门禁反向代理、自签 HTTPS、设备配对、设置页、扫码访问 |
 
-- 声明范围 `>=0.1.7-rc.1 <0.3.0`（`dsh.engines.dsh`）；已验证版本：`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`。未列入的 DSH 版本属**未验证**，请自行验证后再使用。上界在 `0.4.3` 从 `<0.2.0` 放宽：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 `0.2.0` 正式版。
+- 声明范围 `>=0.1.7-rc.1 <0.3.0`（`dsh.engines.dsh`）；已验证版本：`0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`。未列入的 DSH 版本属**未验证**，请自行验证后再使用。上界在 `0.4.3` 从 `<0.2.0` 放宽：profile 加载会拒绝范围不含运行版本的 bundle，而裸的 `<0.2.0` 恰好排除 `0.2.0` 正式版。
 - 本插件用到的宿主/客户端接口：`webServer.register` / `webServer.tapIndex`（indexTaps）、`connection.requestRejection`、`connection.authenticatedUrl`、追加型 `settings.section` seat、`@deepseek-ai/schemastery`，以及 `profileContext`（用于推导默认数据目录）。
 - **破坏性默认值变更（`0.3.2` 起）**：`listenHost` 默认由 `127.0.0.1` 改为 `0.0.0.0`，装完重启一次即可用；`0.3.1` 及更早默认仅回环。门禁与自签 TLS 的默认值未变（未设密码仍拒绝所有设备）。详见 [CHANGELOG](CHANGELOG.md)。
 - **`0.4.0` 的验证状态**：三处改动都做了实测，不只跑用例。
