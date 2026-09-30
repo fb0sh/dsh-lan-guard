@@ -1,20 +1,23 @@
-# 手机端调试 Runbook（mobile-scroll-fix 分支）
+# 手机端调试 Runbook
 
 目标：在一台新机器（MacBook）上从零把插件跑起来 → 确认每一关 → 用手机定位
 「看得见、拖不动」到底卡在哪一层。每一步都给出**期望输出**，不符就停在那一关。
+
+> 电脑上就能做完的窄屏几何回归（两个入口、四个量化判据、免 token 直连 3080 的方法）见
+> [mobile-regression.md](mobile-regression.md)。本页从「手机上真的出问题了」开始往下查。
 
 ## 第 0 关：代码与服务（MacBook 上）
 
 ```bash
 git clone https://github.com/idoall/dsh-lan-guard.git && cd dsh-lan-guard
-git checkout mobile-scroll-fix && git log --oneline -3
-# 期望：含 0.4.4 的 fixClip 提交（release-notes/v0.4.4.md 存在）
+git log --oneline -3
+# 期望：HEAD 是 main 上最新的 release 提交（release-notes/v<版本>.md 存在）
 
 pnpm install && pnpm run verify
-# 期望：Tests 359 passed (359) + 4 次 Build complete
+# 期望：Tests 359 passed (359) + 与源码数一致的 Build complete
 
 dsh plugin --profile web add link:"$PWD"
-# 期望：列出的插件里有 dsh-lan-guard（版本 0.4.4）
+# 期望：列出的插件里有 dsh-lan-guard，且版本 = package.json 的 version（当前 0.4.6）
 ```
 
 > ⚠️ **改完代码必须先 `pnpm run build` 再重启 dsh。** `link:` 安装下宿主只加载 `lib/`，而 `lib/` 被 `.gitignore` 忽略——git 操作不会重建它，重启前的旧构建会被**静默**加载（真机上表现为注入标记齐全、行为却像旧版）。自查一行：`curl -sk https://127.0.0.1:3081/ | grep -c touchPassThrough`，为 `0` 就说明跑的是没有本分支修复的旧产物。

@@ -288,6 +288,16 @@ pnpm run verify    # typecheck + tests + build + pack dry-run
 
 The client half registers into the official additive `settings.section` seat; the host half mounts through the package's own `cordis.patch.yml`.
 
+### Docs
+
+| Document | What it is for |
+| --- | --- |
+| [docs/dsh-version-adaptation.md](docs/dsh-version-adaptation.md) | **Follow this when DSH ships a new version**: which packages to diff, which interfaces to check, how to declare and release |
+| [docs/mobile-regression.md](docs/mobile-regression.md) | **Narrow-screen geometry regression, runnable on a computer**: two entries, four quantitative criteria, token-free direct access to 3080 |
+| [docs/mobile-acceptance.md](docs/mobile-acceptance.md) | On-device acceptance checklist (touch, lock screen / backgrounding, dictation — things a computer cannot verify) |
+| [docs/mobile-debug-runbook.md](docs/mobile-debug-runbook.md) | Runbook for when the phone misbehaves (incl. Web Inspector probes) |
+| [docs/upstream-dsh-0.2.0-rc.1-session-scroll.md](docs/upstream-dsh-0.2.0-rc.1-session-scroll.md) | Draft regression report for upstream (rc.1 transcript clipping) |
+
 ## Release
 
 Releases are tag-driven. Update `package.json`, move the matching CHANGELOG section out of `Unreleased`, write `release-notes/v<version>.md` with both language anchors, then push the release commit and tag:

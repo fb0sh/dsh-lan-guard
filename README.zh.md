@@ -287,6 +287,16 @@ pnpm run verify    # 类型检查 + 测试 + 构建 + pack dry-run
 
 客户端半边注册到官方追加型 seat `settings.section`，宿主半边通过包内 `cordis.patch.yml` 挂载。
 
+### 文档索引
+
+| 文档 | 用途 |
+| --- | --- |
+| [docs/dsh-version-adaptation.md](docs/dsh-version-adaptation.md) | **DSH 升级后照着走**：diff 哪些包、核对哪些接口、怎么落声明与发版 |
+| [docs/mobile-regression.md](docs/mobile-regression.md) | **电脑上就能跑的窄屏几何回归**：两个入口、四个量化判据、免 token 直连 3080 的方法 |
+| [docs/mobile-acceptance.md](docs/mobile-acceptance.md) | 真机验收清单（触摸、锁屏/切后台、语音这些本地验不了的） |
+| [docs/mobile-debug-runbook.md](docs/mobile-debug-runbook.md) | 手机端出问题时的排障手册（含 Web Inspector 探针） |
+| [docs/upstream-dsh-0.2.0-rc.1-session-scroll.md](docs/upstream-dsh-0.2.0-rc.1-session-scroll.md) | 投递上游的回归报告底稿（rc.1 会话裁剪） |
+
 ## 发版
 
 发版由 tag 驱动。更新 `package.json`、把对应 CHANGELOG 段落移出 `Unreleased`、编写带中英双锚点的 `release-notes/v<版本>.md` 后，推送发版提交与 tag：
