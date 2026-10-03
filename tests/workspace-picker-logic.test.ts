@@ -21,6 +21,7 @@ import {
   type ClientEnvironment,
   type FlowSlots,
 } from '../src/client/picker-logic.ts'
+import { en, standaloneTranslate, type Translate } from '../src/client/i18n.ts'
 
 /** A remote browser: the LAN gateway case this whole feature exists for. */
 function remote(overrides: Partial<ClientEnvironment> = {}): ClientEnvironment {
@@ -73,22 +74,37 @@ describe('directoryFlowDecision', () => {
 })
 
 describe('browseErrorNotice', () => {
+  // The notices are message keys resolved by the caller's translator. The
+  // assertions below run against the Chinese dictionary (the stand-in a host
+  // without the locale service gets); the English side is covered by the
+  // dictionary completeness type plus the i18n specs.
+  const t = standaloneTranslate()
+
   it('explains the two authority refusals with the exact fix', () => {
-    expect(browseErrorNotice('read_only_remote').detail).toContain('密码解锁')
-    expect(browseErrorNotice('admin_required').detail).toContain('管理密码')
+    expect(browseErrorNotice('read_only_remote', t).detail).toContain('密码解锁')
+    expect(browseErrorNotice('admin_required', t).detail).toContain('管理密码')
   })
 
   it('explains a blocked path, a missing one and an expired session', () => {
-    expect(browseErrorNotice('blocked').detail).toContain('.ssh')
-    expect(browseErrorNotice('not_found').title).toBe('目录不存在')
-    expect(browseErrorNotice('forbidden').title).toBe('会话已失效')
-    expect(browseErrorNotice('unauthorized').title).toBe('会话已失效')
+    expect(browseErrorNotice('blocked', t).detail).toContain('.ssh')
+    expect(browseErrorNotice('not_found', t).title).toBe('目录不存在')
+    expect(browseErrorNotice('forbidden', t).title).toBe('会话已失效')
+    expect(browseErrorNotice('unauthorized', t).title).toBe('会话已失效')
   })
 
   it('always returns a non-empty notice, even for an unknown code', () => {
-    const unknown = browseErrorNotice('something_new')
+    const unknown = browseErrorNotice('something_new', t)
     expect(unknown.title).not.toBe('')
+    // An unrecognised code is passed through verbatim rather than swallowed:
+    // a new host code stays visible instead of becoming a generic message.
     expect(unknown.detail).toContain('something_new')
+  })
+
+  it('reads the same notice in English when the active locale is English', () => {
+    const english: Translate = (key, params) => en[key].replace(/\{(\w+)\}/g,
+      (match, name: string) => (params !== undefined && name in params ? String(params[name]) : match))
+    expect(browseErrorNotice('not_found', english).title).toBe('Directory not found')
+    expect(browseErrorNotice('unauthorized', english).title).toBe('Session expired')
   })
 })
 

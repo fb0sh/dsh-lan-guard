@@ -17,7 +17,9 @@ import {
   SOCKET_WATCHDOG_MARKER,
   TRANSPORT_GLOBAL,
   UNLOCK_MARKER,
+  injectDocumentLanguage,
   injectMobileCompat,
+  injectPwaInstall,
   injectMobileScrollFix,
   injectSettingsUnlock,
   injectSocketWatchdog,
@@ -28,6 +30,14 @@ import {
   settingsUnlockScript,
   socketWatchdogScript,
 } from '../src/settings/index-tap.ts'
+import {
+  documentLanguageScript,
+  LANGUAGE_MARKER,
+  PWA_MARKER,
+  pwaInstallScript,
+  SERVICE_WORKER_BODY,
+} from '../src/pwa.ts'
+import { SERVICE_WORKER_PATH } from '../src/auth/gate.ts'
 import type { LanGuardLogger } from '../src/log.ts'
 
 /** A logger that records what it was told. */
@@ -470,9 +480,12 @@ describe('injectMobileScrollFix', () => {
         mobileCompat: () => false,
         socketWatchdog: () => false,
         mobileScrollFix: () => on,
+        pwaInstall: () => false,
       },
     })
-    expect(transform(INDEX)).toBe(INDEX)
+    // The language patch has no switch (it fixes a wrong value rather than
+    // adding a behaviour), so "off" means "no scroll fix", not "byte-identical".
+    expect(transform(INDEX)).not.toContain(MOBILE_SCROLL_MARKER)
     on = true
     expect(transform(INDEX)).toContain(MOBILE_SCROLL_MARKER)
   })
@@ -483,7 +496,10 @@ describe('registerIndexPatches', () => {
 
   it('degrades to a warning when the host exposes no tapIndex', () => {
     const { logger, warnings } = recordingLogger()
-    const switches = { settingsUnlock: () => true, mobileCompat: () => true, socketWatchdog: () => true, mobileScrollFix: () => true }
+    const switches = {
+      settingsUnlock: () => true, mobileCompat: () => true, socketWatchdog: () => true,
+      mobileScrollFix: () => true, pwaInstall: () => true,
+    }
     expect(registerIndexPatches({ webServer: {}, switches, logger })).toBeUndefined()
     expect(registerIndexPatches({ webServer: undefined, switches, logger })).toBeUndefined()
     expect(warnings).toHaveLength(2)
@@ -493,6 +509,7 @@ describe('registerIndexPatches', () => {
     let settingsUnlock = false
     let mobileCompat = false
     let socketWatchdog = false
+    let pwaInstall = false
     let transform: (html: string) => string = () => INDEX
     const webServer = { tapIndex: (fn: (html: string) => string) => { transform = fn; return () => {} } }
     registerIndexPatches({
@@ -502,10 +519,16 @@ describe('registerIndexPatches', () => {
         mobileCompat: () => mobileCompat,
         socketWatchdog: () => socketWatchdog,
         mobileScrollFix: () => false,
+        pwaInstall: () => pwaInstall,
       },
     })
 
-    expect(transform(INDEX)).toBe(INDEX)
+    const off = transform(INDEX)
+    for (const marker of [UNLOCK_MARKER, MOBILE_COMPAT_MARKER, SOCKET_WATCHDOG_MARKER, PWA_MARKER]) {
+      expect(off).not.toContain(marker)
+    }
+    // The document-language fix rides no switch: it is injected even here.
+    expect(off).toContain(LANGUAGE_MARKER)
 
     settingsUnlock = true
     expect(transform(INDEX)).toContain(UNLOCK_MARKER)
@@ -513,11 +536,13 @@ describe('registerIndexPatches', () => {
 
     mobileCompat = true
     socketWatchdog = true
+    pwaInstall = true
     const all = transform(INDEX)
     expect(all).toContain(UNLOCK_MARKER)
     expect(all).toContain(MOBILE_COMPAT_MARKER)
     expect(all).toContain(SOCKET_WATCHDOG_MARKER)
-    // Idempotent even when all three are on and the same document renders twice.
+    expect(all).toContain(PWA_MARKER)
+    // Idempotent even when every patch is on and the same document renders twice.
     expect(transform(all)).toBe(all)
   })
 
@@ -526,9 +551,61 @@ describe('registerIndexPatches', () => {
     const webServer = { tapIndex: () => () => { disposed = true } }
     const dispose = registerIndexPatches({
       webServer,
-      switches: { settingsUnlock: () => true, mobileCompat: () => true, socketWatchdog: () => true, mobileScrollFix: () => true },
+      switches: {
+        settingsUnlock: () => true, mobileCompat: () => true, socketWatchdog: () => true,
+        mobileScrollFix: () => true, pwaInstall: () => true,
+      },
     })
     dispose?.()
     expect(disposed).toBe(true)
+  })
+})
+
+describe('document language patch', () => {
+  const SHELL = '<!doctype html><html lang="en"><head><base href="./"></head><body>app</body></html>'
+
+  it('rewrites the shell’s hard-coded lang from the visitor’s browser language', () => {
+    // DSH's index.html hard-codes `lang="en"`, and its locale layer repairs the
+    // attribute only after the SPA boots — too late: Chrome/Edge decide whether
+    // to offer "translate this page" when the document loads, so a Chinese
+    // phone reading a Chinese UI still gets the 英语 → 中文 bar.
+    const out = injectDocumentLanguage(SHELL)
+    expect(out).toContain(LANGUAGE_MARKER)
+    expect(out.indexOf(LANGUAGE_MARKER)).toBeLessThan(out.indexOf('<base'))
+    expect(out).toContain('navigator.language')
+    // Idempotent.
+    expect(injectDocumentLanguage(out)).toBe(out)
+  })
+
+  it('only ever corrects the shell default, so a real declaration wins', () => {
+    expect(documentLanguageScript()).toContain('getAttribute("lang")!=="en"')
+  })
+})
+
+describe('installability worker registration', () => {
+  const SHELL = '<!doctype html><html lang="en"><head></head><body>app</body></html>'
+
+  it('registers the worker at the gate path with an explicit root scope', () => {
+    const out = injectPwaInstall(SHELL)
+    expect(out).toContain(PWA_MARKER)
+    expect(out).toContain(SERVICE_WORKER_PATH)
+    expect(out).toContain('{scope:"/"}')
+    // Idempotent.
+    expect(injectPwaInstall(out)).toBe(out)
+  })
+
+  it('never registers on the loopback origin, where the worker does not exist', () => {
+    // The same index patch runs on DSH's own 127.0.0.1 surface; registering
+    // there would only produce a failed fetch and console noise.
+    expect(pwaInstallScript(SERVICE_WORKER_PATH)).toContain('h==="127.0.0.1"')
+    expect(pwaInstallScript(SERVICE_WORKER_PATH)).toContain('h==="localhost"')
+    // A missing API (plain HTTP is not a secure context) must be a no-op.
+    expect(pwaInstallScript(SERVICE_WORKER_PATH)).toContain('"serviceWorker" in navigator')
+  })
+
+  it('ships a worker that adds a fetch handler and nothing else', () => {
+    expect(SERVICE_WORKER_BODY).toContain("addEventListener('fetch'")
+    expect(SERVICE_WORKER_BODY).not.toContain('respondWith')
+    expect(SERVICE_WORKER_BODY).not.toContain('caches')
   })
 })

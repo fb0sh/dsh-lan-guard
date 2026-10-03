@@ -56,6 +56,7 @@ function configWith(
     socketWatchdog: true,
     mobileCompat: true,
     mobileScrollFix: true,
+    pwaInstall: true,
     auth: {
       enabled: true,
       mode: 'token_and_password',
@@ -120,7 +121,7 @@ async function harness(
       addresses: [],
       selectedUrl: 'http://127.0.0.1:3445/',
       qrSvg: null,
-      unavailableReason: 'loopback only (test)',
+      unavailableReason: 'loopback-only',
     }),
     logger: noopLogger,
   })

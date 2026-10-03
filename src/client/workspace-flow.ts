@@ -21,6 +21,9 @@
  * and DSH's own workspace flow performs the (validated, persisted) registration.
  */
 import { createElement, useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { Button, Icons } from './ui/kit.ts'
+import { FLOW_CSS } from './ui/styles.ts'
+import { standaloneTranslate, type MessageKey, type Translate } from './i18n.ts'
 import {
   BROWSE_PATH,
   BrowseRequestError,
@@ -55,6 +58,8 @@ interface FlowProps {
   pick(): Promise<string | null>
   /** One directory level from the management route. */
   browse(path?: string): Promise<BrowseListingView>
+  /** The plugin's translator, forwarded from the registration. */
+  t?: Translate
 }
 
 /** The stable code of a failed request. */
@@ -80,15 +85,15 @@ function messageOf(reason: unknown): string {
  * @param password - the admin password (or the access password when no separate
  *   admin password is set, which is how the host falls back).
  */
-async function postAdminUnlock(password: string): Promise<void> {
+async function postAdminUnlock(password: string, t: Translate): Promise<void> {
   const response = await fetch(CONFIG_PATH, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ adminUnlock: password }),
   })
-  if (response.status === 401) throw new Error('管理密码不正确')
-  if (!response.ok) throw new Error(`解锁失败（HTTP ${String(response.status)}）`)
+  if (response.status === 401) throw new Error(t('error.adminPasswordInvalid'))
+  if (!response.ok) throw new Error(t('picker.unlockFailed', { status: response.status }))
 }
 
 /**
@@ -142,82 +147,6 @@ function officialPick(ctx: DirectoryFlowContext): (() => Promise<string | null>)
 }
 
 /**
- * Typography and materials come from the official tokens only, exactly as the
- * settings card does; the sheet is a bottom sheet on phones and a centred card
- * from 620px up.
- */
-const FLOW_CSS = `
-.lgp-scrim{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-end;justify-content:center;
-  background:color-mix(in srgb, var(--dsw-alias-bg-mask,#000) 46%, transparent);backdrop-filter:blur(6px);
-  -webkit-backdrop-filter:blur(6px)}
-/*
- * FLEX SHRINK IS EXPLICIT ON EVERY FIXED ROW (user report 2026-09-26: the
- * breadcrumb and the quick-access rows were crushed into one overlapping strip).
- * A flex item's AUTOMATIC minimum size resolves to 0 as soon as its overflow is
- * not visible, and both rows scroll horizontally — so the moment the sheet hit
- * its max-height the browser shrank exactly those two rows to nothing while the
- * list kept its floor. Only the list may flex; everything else is fixed.
- */
-.lgp-sheet{box-sizing:border-box;width:100%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;
-  overflow:hidden;
-  background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l2,#e5e6eb);
-  border-radius:20px 20px 0 0;box-shadow:0 -12px 40px color-mix(in srgb, #000 26%, transparent);
-  padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));gap:12px}
-.lgp-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
-.lgp-title{font:var(--dsw-font-base-16-strong,500 16px/24px sans-serif);color:var(--dsw-alias-label-primary,#1f2329);margin:0}
-.lgp-x{flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:0.5px solid var(--dsw-alias-border-l2,#e5e6eb);
-  background:transparent;color:var(--dsw-alias-label-primary,#1f2329);cursor:pointer;font-size:16px;line-height:1}
-.lgp-crumbs,.lgp-quick{flex:0 0 auto;display:flex;align-items:center;gap:8px;overflow-x:auto;overflow-y:hidden;
-  padding-bottom:2px;scrollbar-width:none}
-.lgp-crumbs::-webkit-scrollbar,.lgp-quick::-webkit-scrollbar,.lgp-list::-webkit-scrollbar{display:none}
-.lgp-crumb{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#4e5969);
-  font:var(--dsw-font-xs-13,13px/20px sans-serif);cursor:pointer;padding:4px 6px;border-radius:8px;white-space:nowrap}
-.lgp-crumb[aria-current=true]{color:var(--dsw-alias-label-primary,#1f2329);font:var(--dsw-font-xs-13-strong,500 13px/20px sans-serif);
-  background:var(--dsw-alias-bg-layer-3,#f1f2f4)}
-.lgp-quickbtn{flex:0 0 auto;border:0.5px solid var(--dsw-alias-border-l2,#e5e6eb);border-radius:999px;
-  background:transparent;color:var(--dsw-alias-label-primary,#1f2329);font:var(--dsw-font-xs-13,13px/20px sans-serif);
-  padding:6px 12px;cursor:pointer;white-space:nowrap}
-/* The list is the ONLY flexible row: it absorbs every bit of shrinkage, so the
-   fixed rows above and the action buttons below stay whole on a short viewport. */
-.lgp-list{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;
-  border:1px solid var(--dsw-alias-border-l2,#e5e6eb);border-radius:14px;padding:6px}
-.lgp-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:transparent;
-  color:var(--dsw-alias-label-primary,#1f2329);font:var(--dsw-font-s-14,14px/22px sans-serif);
-  padding:10px 10px;border-radius:10px;cursor:pointer;min-height:44px}
-.lgp-row:hover{background:var(--dsw-alias-bg-layer-3,#f1f2f4)}
-.lgp-row .lgp-dir{flex:0 0 auto;opacity:.85}
-.lgp-row .lgp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lgp-row[data-hidden=true] .lgp-name{color:var(--dsw-alias-label-tertiary,#adb2b8)}
-.lgp-hint{margin:0;padding:10px 4px;color:var(--dsw-alias-label-secondary,#4e5969);font:var(--dsw-font-xs-13,13px/20px sans-serif)}
-.lgp-notice{flex:0 0 auto;border:1px solid var(--dsw-alias-border-l2,#e5e6eb);border-left:3px solid var(--dsw-alias-state-warning-primary,#d25f00);
-  border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
-.lgp-notice h4{margin:0;font:var(--dsw-font-xs-13-strong,500 13px/20px sans-serif);color:var(--dsw-alias-label-primary,#1f2329)}
-.lgp-notice p{margin:0;font:var(--dsw-font-xs-13,13px/20px sans-serif);color:var(--dsw-alias-label-secondary,#4e5969)}
-.lgp-unlock{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
-.lgp-input{flex:1 1 12ch;min-width:0;height:40px;box-sizing:border-box;border-radius:10px;padding:0 12px;
-  border:1px solid var(--dsw-alias-border-l2,#e5e6eb);background:var(--dsw-alias-bg-layer-2,#fff);
-  color:var(--dsw-alias-label-primary,#1f2329);font:var(--dsw-font-s-14,14px/22px sans-serif)}
-.lgp-btn-inline{flex:0 0 auto;min-width:88px;min-height:40px;padding:0 16px}
-.lgp-code{font:var(--dsw-font-xxs-12,12px/18px ui-monospace,SFMono-Regular,Menlo,monospace);
-  color:var(--dsw-alias-label-tertiary,#adb2b8)}
-.lgp-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:10px}
-.lgp-path{font:var(--dsw-font-xxs-12,12px/18px ui-monospace,SFMono-Regular,Menlo,monospace);
-  color:var(--dsw-alias-label-secondary,#4e5969);overflow-x:auto;white-space:nowrap;scrollbar-width:none}
-.lgp-actions{display:flex;gap:10px}
-.lgp-btn{flex:1 1 auto;min-height:44px;border-radius:12px;cursor:pointer;
-  font:var(--dsw-font-s-14-strong,500 14px/22px sans-serif);border:1px solid transparent}
-.lgp-btn.primary{background:var(--dsw-alias-state-business-primary,#1a3f8f);color:#fff}
-.lgp-btn.ghost{background:transparent;border-color:var(--dsw-alias-border-l2,#e5e6eb);color:var(--dsw-alias-label-primary,#1f2329)}
-.lgp-btn[disabled]{opacity:.5;cursor:default}
-.lgp-busy{align-self:center;margin:auto;padding:16px 20px;border-radius:14px;background:var(--dsw-alias-bg-layer-1,#fff);
-  color:var(--dsw-alias-label-primary,#1f2329);font:var(--dsw-font-s-14,14px/22px sans-serif)}
-@media (min-width:620px){
-  .lgp-scrim{align-items:center}
-  .lgp-sheet{border-radius:20px;max-height:80vh;padding:18px 20px}
-}
-`
-
-/**
  * The shadowing flow occupant.
  *
  * Renderless until the owner opens a pick. One pick per rising `open` edge, one
@@ -229,6 +158,9 @@ const FLOW_CSS = `
  */
 export function DirectoryFlow(props: FlowProps): ReactElement | null {
   const { open, pick, browse } = props
+  // The plugin's translator rides the injected surface; a host without the
+  // locale service leaves it undefined and the Chinese stand-in applies.
+  const t: Translate = props.t ?? standaloneTranslate()
   const latest = useRef(props)
   latest.current = props
   const armed = useRef(false)
@@ -266,7 +198,7 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
       },
       (reason: unknown) => {
         if (!alive.current || !latest.current.open) return
-        setNotice(browseErrorNotice(codeOf(reason)))
+        setNotice(browseErrorNotice(codeOf(reason), t))
         setFailureCode(codeOf(reason))
         setLoading(false)
       },
@@ -327,10 +259,15 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
   if (!open) return null
   if (directoryFlowDecision(readClientEnvironment()) !== 'browse') return null
   if (props.busy === true) {
-    return createElement('div', { className: 'lgp-scrim' }, [
-      createElement('style', { key: 'css' }, FLOW_CSS),
-      createElement('div', { className: 'lgp-busy', role: 'status', key: 'busy' }, '正在添加工作区…'),
-    ])
+    return createElement(
+      'div',
+      { className: 'lgp-root' },
+      createElement('style', null, FLOW_CSS),
+      // The owner is adopting the path, so the surface stays up but inert: it
+      // still masks the page behind it rather than letting clicks through.
+      createElement('div', { className: 'lgp-mask', 'aria-hidden': true }),
+      createElement('div', { className: 'lgp-busy', role: 'status' }, t('picker.adding')),
+    )
   }
 
   const stop = (event: { stopPropagation(): void }): void => {
@@ -344,7 +281,7 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
     if (unlockPassword === '' || unlockBusy) return
     setUnlockBusy(true)
     setUnlockError(null)
-    void postAdminUnlock(unlockPassword).then(
+    void postAdminUnlock(unlockPassword, t).then(
       () => {
         if (!alive.current) return
         setUnlockPassword('')
@@ -363,133 +300,168 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
   /** The console is locked: offer the unlock right here instead of a dead end. */
   const needsUnlock = failureCode === 'admin_required'
 
-  return createElement('div', { className: 'lgp-scrim', key: 'scrim', onClick: cancel }, [
-    createElement('style', { key: 'css' }, FLOW_CSS),
-    createElement('div', {
-      key: 'sheet',
-      className: 'lgp-sheet',
-      role: 'dialog',
-      'aria-modal': 'true',
-      'aria-label': '选择工作区目录',
-      onClick: stop,
-    }, [
-      createElement('div', { className: 'lgp-head', key: 'head' }, [
-        createElement('h3', { className: 'lgp-title', key: 't' }, '选择工作区目录'),
-        createElement('button', {
-          key: 'x',
-          type: 'button',
-          className: 'lgp-x',
-          'aria-label': '取消',
-          onClick: cancel,
-        }, '✕'),
-      ]),
-      notice === null ? null : createElement('div', { className: 'lgp-notice', key: 'notice', role: 'alert' }, [
-        createElement('h4', { key: 't' }, notice.title),
-        createElement('p', { key: 'd' }, notice.detail),
-        needsUnlock
-          ? createElement('div', { className: 'lgp-unlock', key: 'unlock' }, [
-            createElement('input', {
-              key: 'i',
-              className: 'lgp-input',
-              type: 'password',
-              autoComplete: 'current-password',
-              placeholder: '管理密码（未设置时用访问密码）',
-              value: unlockPassword,
-              disabled: unlockBusy,
-              onChange: (event: { target: { value: string } }) => {
-                setUnlockPassword(event.target.value)
-              },
-              onKeyDown: (event: { key: string }) => {
-                if (event.key === 'Enter') submitUnlock()
-              },
-            }),
-            createElement('button', {
-              key: 'b',
-              type: 'button',
-              className: 'lgp-btn primary lgp-btn-inline',
-              disabled: unlockBusy || unlockPassword === '',
-              onClick: submitUnlock,
-            }, unlockBusy ? '解锁中…' : '解锁'),
-            unlockError === null
-              ? null
-              : createElement('p', { className: 'lgp-hint', key: 'e' }, unlockError),
-          ])
-          : createElement('div', { className: 'lgp-unlock', key: 'retry' }, [
-            createElement('button', {
-              key: 'r',
-              type: 'button',
-              className: 'lgp-btn ghost lgp-btn-inline',
-              onClick: () => {
-                load(lastPath.current)
-              },
-            }, '重试'),
-            createElement('span', { className: 'lgp-code', key: 'c' }, failureCode ?? ''),
-          ]),
-      ]),
-      crumbs.length === 0 ? null : createElement('div', { className: 'lgp-crumbs', key: 'crumbs' },
-        crumbs.map((crumb, index) => createElement('button', {
-          key: crumb.path,
-          type: 'button',
-          className: 'lgp-crumb',
-          'aria-current': index === crumbs.length - 1,
-          onClick: () => {
-            load(crumb.path)
-          },
-        }, crumb.name))),
-      (listing?.quick?.length ?? 0) === 0 ? null : createElement('div', { className: 'lgp-quick', key: 'quick' },
-        (listing?.quick ?? []).map(entry => createElement('button', {
-          key: entry.path,
-          type: 'button',
-          className: 'lgp-quickbtn',
-          onClick: () => {
-            load(entry.path)
-          },
-        }, entry.name))),
-      createElement('div', { className: 'lgp-list', key: 'list' }, loading
-        ? [createElement('p', { className: 'lgp-hint', key: 'loading' }, '正在读取…')]
-        : listing === null
-          // A refusal is never dressed up as "this folder is empty": the notice
-          // above carries the reason, and this says so.
-          ? [createElement('p', { className: 'lgp-hint', key: 'blocked' }, '目录暂时无法读取，见上方提示。')]
-          : rows.length === 0
-            ? [createElement('p', { className: 'lgp-hint', key: 'empty' }, '这个文件夹里没有子文件夹')]
-            : rows.map(entry => createElement('button', {
-              key: entry.path,
-              type: 'button',
-              className: 'lgp-row',
-              'data-hidden': entry.hidden,
-              onClick: () => {
-                load(entry.path)
-              },
-            }, [
-              createElement('span', { className: 'lgp-dir', key: 'i' }, '📁'),
-              createElement('span', { className: 'lgp-name', key: 'n' }, entry.name),
-            ]))),
-      listing?.truncated === true
-        ? createElement('p', { className: 'lgp-hint', key: 'trunc' }, '子文件夹太多，只显示了前一部分。')
-        : null,
-      createElement('div', { className: 'lgp-foot', key: 'foot' }, [
-        createElement('div', { className: 'lgp-path', key: 'p', title: listing?.path ?? '' }, listing?.path ?? ''),
-        createElement('div', { className: 'lgp-actions', key: 'a' }, [
-          createElement('button', {
-            key: 'cancel',
+  const listBody = loading
+    ? [createElement('p', { className: 'lgp-hint', key: 'loading' }, t('common.loading'))]
+    : listing === null
+      // A refusal is never dressed up as "this folder is empty": the notice
+      // above carries the reason, and this says so.
+      ? [createElement('p', { className: 'lgp-hint', key: 'blocked' }, t('picker.unreadable'))]
+      : rows.length === 0
+        ? [createElement('p', { className: 'lgp-hint', key: 'empty' }, t('picker.empty'))]
+        : rows.map(entry => createElement(
+          'button',
+          {
+            key: entry.path,
             type: 'button',
-            className: 'lgp-btn ghost',
-            onClick: cancel,
-          }, '取消'),
-          createElement('button', {
-            key: 'use',
-            type: 'button',
-            className: 'lgp-btn primary',
+            className: 'lgp-row',
+            'data-hidden': entry.hidden,
+            onClick: () => {
+              load(entry.path)
+            },
+          },
+          createElement('span', { className: 'lgp-dir' }, createElement(Icons.folder, { size: 16 })),
+          createElement('span', { className: 'lgp-name' }, entry.name),
+        ))
+
+  return createElement(
+    'div',
+    { className: 'lgp-root' },
+    createElement('style', null, FLOW_CSS),
+    createElement('div', { className: 'lgp-mask', 'aria-hidden': true, onClick: cancel }),
+    createElement(
+      'div',
+      {
+        className: 'lgp-dialog',
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': t('picker.title'),
+        onClick: stop,
+      },
+      createElement(
+        'div',
+        { className: 'lgp-head' },
+        createElement('h3', { className: 'lgp-title' }, t('picker.title')),
+        createElement(
+          'button',
+          { type: 'button', className: 'lgp-x', 'aria-label': t('common.cancel'), onClick: cancel },
+          createElement(Icons.close, { size: 14 }),
+        ),
+      ),
+      createElement(
+        'div',
+        { className: 'lgp-body' },
+        notice === null
+          ? null
+          : createElement(
+            'div',
+            { className: 'lgp-notice', role: 'alert' },
+            createElement('h4', null, notice.title),
+            createElement('p', null, notice.detail),
+            needsUnlock
+              ? createElement(
+                'div',
+                { className: 'lgp-unlock' },
+                createElement('input', {
+                  className: 'lgp-input',
+                  type: 'password',
+                  autoComplete: 'current-password',
+                  placeholder: t('picker.unlockPlaceholder'),
+                  value: unlockPassword,
+                  disabled: unlockBusy,
+                  onChange: (event: { target: { value: string } }) => {
+                    setUnlockPassword(event.target.value)
+                  },
+                  onKeyDown: (event: { key: string }) => {
+                    if (event.key === 'Enter') submitUnlock()
+                  },
+                }),
+                createElement(Button, {
+                  variant: 'primary',
+                  disabled: unlockBusy || unlockPassword === '',
+                  onClick: submitUnlock,
+                }, unlockBusy ? t('picker.unlocking') : t('picker.unlock')),
+                unlockError === null
+                  ? null
+                  : createElement('p', { className: 'lgp-hint' }, unlockError),
+              )
+              : createElement(
+                'div',
+                { className: 'lgp-unlock' },
+                createElement(Button, {
+                  variant: 'outline',
+                  icon: createElement(Icons.refresh, { size: 14 }),
+                  onClick: () => {
+                    load(lastPath.current)
+                  },
+                }, t('common.retry')),
+                createElement('span', { className: 'lgp-code' }, failureCode ?? ''),
+              ),
+          ),
+        crumbs.length === 0
+          ? null
+          : createElement(
+            'div',
+            { className: 'lgp-crumbs' },
+            ...crumbs.map((crumb, index) => createElement(
+              'button',
+              {
+                key: crumb.path,
+                type: 'button',
+                className: 'lgp-crumb',
+                'aria-current': index === crumbs.length - 1,
+                onClick: () => {
+                  load(crumb.path)
+                },
+              },
+              crumb.name,
+            )),
+          ),
+        (listing?.quick?.length ?? 0) === 0
+          ? null
+          : createElement(
+            'div',
+            { className: 'lgp-quick' },
+            ...(listing?.quick ?? []).map(entry => createElement(
+              'button',
+              {
+                key: entry.path,
+                type: 'button',
+                className: 'lgp-quickbtn',
+                onClick: () => {
+                  load(entry.path)
+                },
+              },
+              // A host-supplied key means the name is plugin copy ("Home"),
+              // not a real path segment; anything else is shown verbatim.
+              entry.nameKey === undefined
+                ? entry.name
+                : t(entry.nameKey as MessageKey, entry.nameParams),
+            )),
+          ),
+        createElement('div', { className: 'lgp-list' }, ...listBody),
+        listing?.truncated === true
+          ? createElement('p', { className: 'lgp-hint' }, t('picker.truncated'))
+          : null,
+      ),
+      createElement(
+        'div',
+        { className: 'lgp-foot' },
+        createElement('div', { className: 'lgp-path', title: listing?.path ?? '' }, listing?.path ?? ''),
+        createElement(
+          'div',
+          { className: 'lgp-actions' },
+          createElement(Button, { variant: 'outline', onClick: cancel }, t('common.cancel')),
+          createElement(Button, {
+            variant: 'primary',
             disabled: listing === null,
             onClick: () => {
               if (listing !== null) latest.current.onPicked(listing.path)
             },
-          }, '使用此目录'),
-        ]),
-      ]),
-    ].filter(Boolean) as ReactElement[]),
-  ])
+          }, t('picker.use')),
+        ),
+      ),
+    ),
+  )
 }
 
 /**
@@ -497,13 +469,13 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
  *
  * @param ctx - the client plugin context.
  */
-export function applyDirectoryFlow(ctx: DirectoryFlowContext): void {
+export function applyDirectoryFlow(ctx: DirectoryFlowContext, i18n: { t: Translate }): void {
   const pick = (): Promise<string | null> => {
     const official = officialPick(ctx)
     if (official === undefined) {
-      throw new Error('这台主机没有可用的系统目录选择器')
+      throw new Error(i18n.t('picker.noPicker'))
     }
     return official()
   }
-  registerDirectoryFlow(ctx.slots, DirectoryFlow, { pick, browse: fetchListing })
+  registerDirectoryFlow(ctx.slots, DirectoryFlow, { pick, browse: fetchListing, t: i18n.t })
 }

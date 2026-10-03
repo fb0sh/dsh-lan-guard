@@ -146,6 +146,17 @@ export interface LanGuardConfigShape {
    * clipping overflowing content.
    */
   mobileScrollFix: boolean
+  /**
+   * Whether the served index registers the installability service worker
+   * (default true).
+   *
+   * This is what turns "create shortcut" into "install as an app" on Android:
+   * Chromium refuses the install entry for an origin with no service worker,
+   * and DSH registers none. The worker itself does nothing — see `pwa.ts` —
+   * so the switch exists for an operator who does not want a registration
+   * surviving on every visitor's device.
+   */
+  pwaInstall: boolean
   /** Visitor-side gate configuration. */
   auth: AuthConfigShape
   /** Transport security configuration. */
@@ -224,6 +235,9 @@ export const Config: z<LanGuardConfigShape, Record<string, unknown>> = z.object(
   socketWatchdog: z.boolean().default(true).volatile(),
   mobileCompat: z.boolean().default(true).volatile(),
   mobileScrollFix: z.boolean().default(true).volatile(),
+  // Independent of mobileCompat on purpose: the shims patch an API for one
+  // page, while a service worker is a registration that outlives it.
+  pwaInstall: z.boolean().default(true).volatile(),
   auth: z.object({
     // NOT volatile on purpose (PLAN §5 工作项 9 lists the writable switches):
     // the gate master switch is a startup-safety field (SPEC §5 principle 3),
@@ -283,6 +297,8 @@ export interface LiveSwitches {
   mobileCompat(): boolean
   /** Whether the served index carries the narrow-screen scroll correction. */
   mobileScrollFix(): boolean
+  /** Whether the served index registers the installability service worker. */
+  pwaInstall(): boolean
   /** Whether an unnamed device must pair before it is let in. */
   requirePairing(): boolean
   /** Whether a paired device still needs the operator's approval (F9). */
@@ -324,6 +340,7 @@ export function liveSwitches(rawConfig: unknown, resolved: LanGuardConfigShape):
     socketWatchdog: () => readField(root.socketWatchdog, resolved.socketWatchdog),
     mobileCompat: () => readField(root.mobileCompat, resolved.mobileCompat),
     mobileScrollFix: () => readField(root.mobileScrollFix, resolved.mobileScrollFix),
+    pwaInstall: () => readField(root.pwaInstall, resolved.pwaInstall),
     mode: () => readField(root.auth === undefined ? undefined : auth.mode, resolved.auth.mode),
     adminPolicy: () => readField(root.auth === undefined ? undefined : auth.adminPolicy, resolved.auth.adminPolicy),
     adminProtection: () => readField(
@@ -351,6 +368,7 @@ export function staticSwitches(config: LanGuardConfigShape): LiveSwitches {
     socketWatchdog: () => config.socketWatchdog,
     mobileCompat: () => config.mobileCompat,
     mobileScrollFix: () => config.mobileScrollFix,
+    pwaInstall: () => config.pwaInstall,
     mode: () => config.auth.mode,
     adminPolicy: () => config.auth.adminPolicy,
     adminProtection: () => config.auth.adminProtection,
@@ -484,7 +502,7 @@ function unwrapVolatileInput(input: unknown): unknown {
   const result: Record<string, unknown> = { ...source }
   for (const key of [
     'enabled', 'networkInterface', 'listenPort', 'listenHost', 'settingsUnlock',
-    'answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix',
+    'answerHeartbeat', 'socketWatchdog', 'mobileCompat', 'mobileScrollFix', 'pwaInstall',
   ]) {
     const value = result[key]
     if (isVolatileLike(value)) result[key] = (value as { get(): unknown }).get()
@@ -542,6 +560,7 @@ export function parseConfig(input: unknown, profileDir?: string | undefined): La
     socketWatchdog: readField(resolved.socketWatchdog, true),
     mobileCompat: readField(resolved.mobileCompat, true),
     mobileScrollFix: readField(resolved.mobileScrollFix, true),
+    pwaInstall: readField(resolved.pwaInstall, true),
     auth: {
       enabled: readField(rawAuth.enabled, true),
       mode: readField(rawAuth.mode, 'token_and_password'),

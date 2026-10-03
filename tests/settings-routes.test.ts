@@ -42,6 +42,7 @@ function configWith(overrides: Partial<LanGuardConfigShape['auth']> = {}): LanGu
     socketWatchdog: true,
     mobileCompat: true,
     mobileScrollFix: true,
+    pwaInstall: true,
     auth: {
       enabled: true,
       mode: 'token_and_password',
@@ -139,7 +140,7 @@ async function harness(options: {
       ...(secretToken === null || secretToken === undefined
         ? {}
         : { tokenUrl: `http://127.0.0.1:${String(config.listenPort)}/?auth=${secretToken}`, tokenQrSvg: '<svg></svg>' }),
-      unavailableReason: 'loopback only (test)',
+      unavailableReason: 'loopback-only',
     }),
     logger: noopLogger,
   })
@@ -230,6 +231,7 @@ describe('snapshot', () => {
       socketWatchdog: true,
       mobileCompat: true,
       mobileScrollFix: true,
+      pwaInstall: true,
       mode: 'token_and_password',
       adminPolicy: 'local_only',
       adminProtection: true,

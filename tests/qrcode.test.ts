@@ -60,7 +60,11 @@ describe('buildAccessInfo', () => {
     })
     expect(info.selectedUrl).toBeNull()
     expect(info.qrSvg).toBeNull()
-    expect(info.unavailableReason).toContain('en9')
+    // The host answers with a CODE, never with a sentence: the settings page
+    // owns the wording, so the same condition reads correctly in either
+    // language. The interface it names travels beside the code.
+    expect(info.unavailableReason).toBe('interface-missing')
+    expect(info.unavailableInterface).toBe('en9')
   })
 
   it('produces the passwordless URL and QR only when a token is supplied', async () => {
@@ -84,7 +88,7 @@ describe('buildAccessInfo', () => {
     })
     expect(info.loopbackOnly).toBe(true)
     expect(info.qrSvg).toBeNull()
-    expect(info.unavailableReason).toContain('回环')
+    expect(info.unavailableReason).toBe('loopback-only')
   })
 
   it('reflects the transport in the URL', async () => {

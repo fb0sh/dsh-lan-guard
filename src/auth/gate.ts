@@ -31,6 +31,12 @@ import {
   readCookie,
 } from './manager.ts'
 import { renderLoginPage, renderPairingPage, type LoginState } from './login-page.ts'
+import { SERVICE_WORKER_BODY } from '../pwa.ts'
+import {
+  resolveGateLocale,
+  type GateLocale,
+  type SettingsReaderLike,
+} from './gate-i18n.ts'
 
 /** Path prefix the gate owns on the proxy origin. */
 export const GATE_PREFIX = '/__dsh_lan_guard__'
@@ -38,6 +44,16 @@ export const GATE_PREFIX = '/__dsh_lan_guard__'
 export const LOGIN_PATH = `${GATE_PREFIX}/login`
 /** The device-pairing form's action path. */
 export const PAIR_PATH = `${GATE_PREFIX}/pair`
+/**
+ * The installability service worker.
+ *
+ * Public on purpose: the browser fetches it when the page registers it, and it
+ * carries no state, no credential and no behaviour of its own (see
+ * `../pwa.ts`). Serving it from the gate's prefix is also what lets the response
+ * carry `Service-Worker-Allowed: /`, without which the worker could never
+ * control the page and the install check would still fail.
+ */
+export const SERVICE_WORKER_PATH = `${GATE_PREFIX}/sw.js`
 /** Largest accepted login body. */
 const MAX_LOGIN_BODY_BYTES = 4 * 1024
 
@@ -50,6 +66,14 @@ export interface VisitorGateOptions {
   requirePairing?: (() => boolean) | undefined
   /** Whether a paired device also needs the operator's approval (F9). */
   requireApproval?: (() => boolean) | undefined
+  /**
+   * DSH's `settings` service, read only for the locale preference.
+   *
+   * Optional: without it the gate follows `Accept-Language` instead of failing,
+   * which keeps the pages rendering on a host the plugin cannot read settings
+   * from.
+   */
+  settings?: SettingsReaderLike | undefined
   logger?: LanGuardLogger
 }
 
@@ -92,6 +116,7 @@ export class VisitorGate {
   readonly #devices: DeviceRegistry | undefined
   readonly #requirePairing: () => boolean
   readonly #requireApproval: () => boolean
+  readonly #settings: SettingsReaderLike | undefined
   readonly #logger: LanGuardLogger
 
   constructor(options: VisitorGateOptions) {
@@ -99,6 +124,7 @@ export class VisitorGate {
     this.#devices = options.devices
     this.#requirePairing = options.requirePairing ?? (() => false)
     this.#requireApproval = options.requireApproval ?? (() => false)
+    this.#settings = options.settings
     this.#logger = options.logger ?? noopLogger
   }
 
@@ -131,6 +157,15 @@ export class VisitorGate {
         return 'handled'
       }
       this.#sendPairingPage(req, res)
+      return 'handled'
+    }
+
+    if (url.pathname === SERVICE_WORKER_PATH) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        this.#sendJson(res, 405, { ok: false, error: 'method_not_allowed' })
+        return 'handled'
+      }
+      this.#sendServiceWorker(res)
       return 'handled'
     }
 
@@ -284,6 +319,7 @@ export class VisitorGate {
     const html = renderPairingPage({
       defaultLabel: guessDeviceLabel(req.headers['user-agent']),
       ip: clientIp(req),
+      locale: this.#localeOf(req),
       ...(error === undefined ? {} : { error }),
     })
     res.writeHead(200, {
@@ -461,6 +497,22 @@ export class VisitorGate {
     this.#sendLoginPage(req, res, 'prompt', 401, undefined, next)
   }
 
+  /**
+   * The language this request's pages are served in.
+   *
+   * DSH's stored preference — the one the official settings page writes — wins;
+   * a browser with none follows what it asks for, which is DSH's own rule for a
+   * visitor it has never seen. Resolved per request, so changing the language in
+   * Settings takes effect on the next page load with no restart.
+   */
+  #localeOf(req: IncomingMessage): GateLocale {
+    return resolveGateLocale({
+      settings: this.#settings,
+      acceptLanguage: req.headers['accept-language'],
+      logger: this.#logger,
+    })
+  }
+
   /** Write the login page. */
   #sendLoginPage(
     req: IncomingMessage,
@@ -473,6 +525,7 @@ export class VisitorGate {
     const html = renderLoginPage({
       state,
       mode: this.#auth.mode,
+      locale: this.#localeOf(req),
       // The visitor must be told that a second gate (naming) follows the
       // password; it is only true while the pairing switch is on.
       pairingRequired: this.#requirePairing(),
@@ -495,6 +548,29 @@ export class VisitorGate {
       'cache-control': 'no-store',
     })
     res.end(`${JSON.stringify(body)}\n`)
+  }
+
+  /**
+   * Serve the installability worker.
+   *
+   * `Service-Worker-Allowed: /` is the whole point of serving it from here: the
+   * script lives under the gate's prefix, and without that header its maximum
+   * scope would be that prefix, so it would never control the application page
+   * and the browser would keep refusing to install.
+   *
+   * `no-cache` (rather than `no-store`) matches how browsers treat worker
+   * scripts: they revalidate on every registration, and a stored copy older
+   * than 24 h is bypassed anyway.
+   */
+  #sendServiceWorker(res: ServerResponse): void {
+    res.writeHead(200, {
+      'content-type': 'application/javascript; charset=utf-8',
+      'service-worker-allowed': '/',
+      'cache-control': 'no-cache',
+      // The worker script is same-origin plumbing; it must never be embedded.
+      'x-content-type-options': 'nosniff',
+    })
+    res.end(SERVICE_WORKER_BODY)
   }
 }
 

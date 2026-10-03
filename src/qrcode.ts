@@ -30,6 +30,15 @@ export interface AccessAddress {
 }
 
 /** Everything the settings page needs to show a scannable link. */
+/**
+ * Why no QR code could be produced.
+ *
+ * A stable CODE rather than a sentence: the settings page owns the wording, so
+ * the same condition reads correctly in either language and the host never
+ * ships copy.
+ */
+export type AccessUnavailableCode = 'loopback-only' | 'no-address' | 'interface-missing'
+
 export interface AccessInfo {
   /** Proxy port. */
   port: number
@@ -52,7 +61,10 @@ export interface AccessInfo {
   /** QR for the passwordless URL (admin-unlocked callers only). */
   tokenQrSvg?: string
   /** Why no URL is available, when that is the case. */
-  unavailableReason?: string
+  /** Why no QR is available, when one is not. */
+  unavailableReason?: AccessUnavailableCode
+  /** The interface named by an `interface-missing` reason. */
+  unavailableInterface?: string
   /** Whether the listener is loopback-only, so no LAN device can reach it. */
   loopbackOnly: boolean
 }
@@ -122,14 +134,17 @@ export async function buildAccessInfo(options: AccessInfoOptions): Promise<Acces
   if (loopbackOnly) {
     // A loopback URL is useless on a phone, so no QR is produced and the page
     // is told exactly why instead of being handed a scan that cannot work.
-    info.unavailableReason = '当前仅绑定回环地址，局域网设备无法访问；请将 listenHost 设为 0.0.0.0 或指定网卡地址'
+    info.unavailableReason = 'loopback-only'
     return info
   }
 
   if (chosen === undefined) {
     info.unavailableReason = options.networkInterface === null || options.networkInterface === undefined
-      ? '未检测到可用的局域网 IPv4 地址'
-      : `配置的网卡 ${String(options.networkInterface)} 不存在或没有 IPv4 地址`
+      ? 'no-address'
+      : 'interface-missing'
+    if (options.networkInterface !== null && options.networkInterface !== undefined) {
+      info.unavailableInterface = options.networkInterface
+    }
     return info
   }
 

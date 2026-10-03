@@ -10,6 +10,8 @@ import { randomBytes } from 'node:crypto'
 import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startLanGuard, type LanGuardRuntime } from '../src/index.ts'
+import { GATE_PREFIX, SERVICE_WORKER_PATH } from '../src/auth/gate.ts'
+import { renderPairingPage } from '../src/auth/login-page.ts'
 import type { LanGuardLogger } from '../src/log.ts'
 import { startFakeDsh, type FakeDsh } from './helpers/fake-dsh.ts'
 import { requestTo, type RawResponse } from './helpers/http-client.ts'
@@ -32,8 +34,20 @@ function silentLogger(): LanGuardLogger {
   return { info() {}, warn() {}, debug() {} }
 }
 
-/** Bring up a gated proxy over a fake upstream. */
-async function harness(config: Record<string, unknown> = {}, password = PASSWORD): Promise<{
+/**
+ * Bring up a gated proxy over a fake upstream.
+ *
+ * @param config - plugin config overrides.
+ * @param password - the access password to install, or '' for none.
+ * @param settingsReader - a stand-in for DSH's settings service. Only the locale
+ *   resolution reads it; the language specs below use it to prove the gate's own
+ *   pages follow the preference the official settings page writes.
+ */
+async function harness(
+  config: Record<string, unknown> = {},
+  password = PASSWORD,
+  settingsReader?: { describe(): readonly { ns: string; value?: unknown }[] },
+): Promise<{
   fake: FakeDsh
   runtime: LanGuardRuntime
   port: number
@@ -42,6 +56,7 @@ async function harness(config: Record<string, unknown> = {}, password = PASSWORD
   const started = await startLanGuard({
     authenticatedUrl: upstream.authenticatedUrl,
     logger: silentLogger(),
+    ...(settingsReader === undefined ? {} : { settingsReader }),
   }, {
     dataDir: await tmpDataDir(),
     listenHost: '127.0.0.1',
@@ -152,6 +167,147 @@ describe('unauthenticated access', () => {
     const response = await requestTo(port, { path: '/__dsh_lan_guard__/whatever' })
     expect(response.status).toBe(404)
     expect(upstream.observed.filter(entry => !entry.url.includes('token='))).toHaveLength(0)
+  })
+})
+
+describe('installability service worker', () => {
+  it('is served publicly, from the gate path, scoped to the whole origin', async () => {
+    const { port } = await harness()
+    // No session, no cookie: the browser fetches the worker at registration
+    // time, and the script itself carries no state and no credential.
+    const response = await requestTo(port, { path: SERVICE_WORKER_PATH })
+    expect(response.status).toBe(200)
+    expect(response.headers['content-type']).toContain('application/javascript')
+    // Without this header the worker's scope would be its own directory, it
+    // would never control the page, and Chromium would keep refusing to
+    // install — which is the whole reason the route exists.
+    expect(response.headers['service-worker-allowed']).toBe('/')
+    expect(response.headers['x-content-type-options']).toBe('nosniff')
+    expect(response.body.toString()).toContain("addEventListener('fetch'")
+    expect(response.headers['content-type']).not.toContain('text/html')
+  })
+
+  it('never intercepts a request', async () => {
+    const { port } = await harness()
+    const body = (await requestTo(port, { path: SERVICE_WORKER_PATH })).body.toString()
+    // respondWith is what would put the worker between a visitor and an
+    // authenticated, cookie-carrying, streaming app. It must never appear.
+    expect(body).not.toContain('respondWith')
+    expect(body).not.toContain('caches')
+  })
+
+  it('refuses a write, like every other gate asset', async () => {
+    const { port } = await harness()
+    const response = await requestTo(port, { method: 'POST', path: SERVICE_WORKER_PATH })
+    expect(response.status).toBe(405)
+    expect(JSON.parse(response.body.toString())).toEqual({ ok: false, error: 'method_not_allowed' })
+  })
+
+  it('answers the rest of the gate prefix with a JSON 404', async () => {
+    const { port } = await harness()
+    const response = await requestTo(port, { path: `${GATE_PREFIX}/nope` })
+    expect(response.status).toBe(404)
+    expect(JSON.parse(response.body.toString())).toEqual({ ok: false, error: 'not_found' })
+  })
+})
+
+
+describe('gate page language', () => {
+  it('follows the preference the official settings page stored', async () => {
+    const { port } = await harness({}, PASSWORD, {
+      describe: () => [{ ns: 'locale', value: { preference: 'en' } }],
+    })
+    const page = await requestTo(port, {
+      path: '/',
+      // The browser asks for Chinese; the STORED preference still wins, because
+      // that is the setting the user actually chose.
+      headers: { accept: 'text/html', 'accept-language': 'zh-CN,zh;q=0.9' },
+    })
+    expect(page.headers['content-type']).toContain('text/html')
+    expect(page.body.toString()).toContain('Access password')
+    expect(page.body.toString()).toContain('Enter DSH')
+    expect(page.body.toString()).not.toContain('访问密码')
+  })
+
+  it('serves Chinese when that is the stored preference', async () => {
+    const { port } = await harness({}, PASSWORD, {
+      describe: () => [{ ns: 'locale', value: { preference: 'zh' } }],
+    })
+    const page = await requestTo(port, {
+      path: '/',
+      headers: { accept: 'text/html', 'accept-language': 'en-US,en;q=0.9' },
+    })
+    expect(page.body.toString()).toContain('访问密码')
+    expect(page.body.toString()).not.toContain('Access password')
+  })
+
+  it('declares the matching document language', async () => {
+    const english = await harness({}, PASSWORD, {
+      describe: () => [{ ns: 'locale', value: { preference: 'en' } }],
+    })
+    const englishPage = await requestTo(english.port, { path: '/', headers: { accept: 'text/html' } })
+    expect(englishPage.body.toString()).toContain('<html lang="en">')
+
+    await runtime?.close()
+    runtime = undefined
+    const chinese = await harness({}, PASSWORD, {
+      describe: () => [{ ns: 'locale', value: { preference: 'zh' } }],
+    })
+    const chinesePage = await requestTo(chinese.port, { path: '/', headers: { accept: 'text/html' } })
+    expect(chinesePage.body.toString()).toContain('<html lang="zh-CN">')
+  })
+
+  it('follows the browser only while no preference is stored', async () => {
+    // DSH's own rule for a browser it has never seen: the first supported
+    // language it asks for.
+    const { port } = await harness({}, PASSWORD, { describe: () => [] })
+    const english = await requestTo(port, {
+      path: '/',
+      headers: { accept: 'text/html', 'accept-language': 'en-GB,en;q=0.8' },
+    })
+    expect(english.body.toString()).toContain('Access password')
+
+    const chinese = await requestTo(port, {
+      path: '/',
+      headers: { accept: 'text/html', 'accept-language': 'zh-Hans-CN,zh;q=0.9' },
+    })
+    expect(chinese.body.toString()).toContain('访问密码')
+  })
+
+  it('keeps rendering when the settings service cannot be read', async () => {
+    // A refusal to read settings must never take the gate's pages down.
+    const { port } = await harness({}, PASSWORD, {
+      describe: () => {
+        throw new Error('settings unavailable')
+      },
+    })
+    const page = await requestTo(port, {
+      path: '/',
+      headers: { accept: 'text/html', 'accept-language': 'en' },
+    })
+    expect(page.status).toBe(401)
+    expect(page.body.toString()).toContain('Access password')
+  })
+
+  it('translates the pairing hint on the login form', async () => {
+    const { port } = await harness({ auth: { requirePairing: true } }, PASSWORD, {
+      describe: () => [{ ns: 'locale', value: { preference: 'en' } }],
+    })
+    const page = await requestTo(port, { path: '/', headers: { accept: 'text/html' } })
+    // The second gate has to be announced in the same language as the first —
+    // a half-translated page is worse than an untranslated one.
+    expect(page.body.toString()).toContain('First visit: naming the device follows')
+  })
+
+  it('translates the pairing page itself', () => {
+    // Reached only after a successful login, so it is asserted on the renderer
+    // the gate calls rather than through a second HTTP round trip.
+    const html = renderPairingPage({ defaultLabel: 'My phone', ip: '192.168.1.9', locale: 'en' })
+    expect(html).toContain('Confirm this device')
+    expect(html).toContain('Confirm and enter DSH')
+    expect(html).toContain('Source address: 192.168.1.9')
+    expect(html).not.toContain('确认')
+    expect(html).toContain('<html lang="en">')
   })
 })
 
@@ -489,7 +645,7 @@ describe('first-visit guidance: the second gate is announced', () => {
     const page = await requestTo(port, { path: '/', headers: { accept: 'text/html' } })
     expect(page.status).toBe(401)
     expect(page.body.toString()).toContain('首次访问')
-    expect(page.body.toString()).toContain('给这台设备起个名字')
+    expect(page.body.toString()).toContain('需为设备命名')
   })
 
   it('announces it on the inert-link page too, where a login is still possible', async () => {
@@ -500,7 +656,7 @@ describe('first-visit guidance: the second gate is announced', () => {
     })
     expect(page.status).toBe(401)
     expect(page.body.toString()).toContain('免密链接无效')
-    expect(page.body.toString()).toContain('给这台设备起个名字')
+    expect(page.body.toString()).toContain('需为设备命名')
   })
 
   it('stays silent when pairing is switched off, so it never promises a name page', async () => {
@@ -508,7 +664,7 @@ describe('first-visit guidance: the second gate is announced', () => {
     const page = await requestTo(port, { path: '/', headers: { accept: 'text/html' } })
     expect(page.status).toBe(401)
     expect(page.body.toString()).toContain('访问密码')
-    expect(page.body.toString()).not.toContain('给这台设备起个名字')
+    expect(page.body.toString()).not.toContain('需为设备命名')
   })
 
   it('stays silent where a login cannot proceed at all', async () => {
@@ -517,7 +673,7 @@ describe('first-visit guidance: the second gate is announced', () => {
     const page = await requestTo(port, { path: '/', headers: { accept: 'text/html' } })
     expect(page.status).toBe(403)
     expect(page.body.toString()).toContain('尚未设置访问密码')
-    expect(page.body.toString()).not.toContain('给这台设备起个名字')
+    expect(page.body.toString()).not.toContain('需为设备命名')
   })
 })
 

@@ -51,9 +51,29 @@ import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path'
 export const MAX_ENTRIES = 1000
 
 /** One selectable row. */
+/*
+ * NOT localizable, deliberately: the `message` on every refusal below is a
+ * DIAGNOSTIC. The page never renders it — `picker-logic` maps the stable
+ * `error` code to a translated notice and shows that instead — so these strings
+ * stay out of the dictionaries. Turning them into keys would put copy on the
+ * wire that no user ever reads.
+ */
+
 export interface BrowseEntry {
   /** The display name (one path segment). */
   name: string
+  /**
+   * A message key for the name, when it is plugin copy rather than a real
+   * path segment.
+   *
+   * The five fixed shortcuts are words ("Home", "Desktop"), so they are sent as
+   * keys and translated by the page, which knows the active language. Real
+   * directory names — and the Windows drive letter — have no key and are
+   * displayed verbatim.
+   */
+  nameKey?: string
+  /** Placeholders for {@link nameKey}. */
+  nameParams?: Record<string, string>
   /** The absolute path to hand back to DSH's workspace flow. */
   path: string
   /** A dot-prefixed entry; the page dims it but still offers it. */
@@ -277,7 +297,7 @@ export async function resolveBrowsablePath(raw: unknown): Promise<{ ok: true; pa
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       return { ok: false, error: 'not_found', message: '目录不存在' }
     }
-    return { ok: false, error: 'unreadable', message: `无法访问该目录（${code ?? 'unknown'}）` }
+    return { ok: false, error: 'unreadable', message: `无法访问该目录（${code ?? '未知'}）` }
   }
 
   // Second pass, now against the PHYSICAL target: this is what stops a symlink
@@ -299,7 +319,7 @@ export async function resolveBrowsablePath(raw: unknown): Promise<{ ok: true; pa
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    return { ok: false, error: 'unreadable', message: `无法访问该目录（${code ?? 'unknown'}）` }
+    return { ok: false, error: 'unreadable', message: `无法访问该目录（${code ?? '未知'}）` }
   }
   return { ok: true, path: canonical }
 }
@@ -336,25 +356,37 @@ export function crumbsOf(current: string): BrowseCrumb[] {
 /** Shortcut rows that exist on this machine. */
 async function quickAccess(): Promise<BrowseEntry[]> {
   const home = homedir()
-  const rows: BrowseEntry[] = [{ name: '🏠 用户主目录', path: home, hidden: false }]
-  const named: readonly { name: string; segment: string }[] = [
-    { name: '💻 桌面', segment: 'Desktop' },
-    { name: '📁 文档', segment: 'Documents' },
-    { name: '📥 下载', segment: 'Downloads' },
-    { name: '📦 Projects', segment: 'Projects' },
-    { name: '💻 code', segment: 'code' },
-    { name: '💻 src', segment: 'src' },
+  const rows: BrowseEntry[] = [
+    { name: 'Home', nameKey: 'quick.home', path: home, hidden: false },
+  ]
+  const named: readonly { name: string; nameKey: string; segment: string }[] = [
+    { name: 'Desktop', nameKey: 'quick.desktop', segment: 'Desktop' },
+    { name: 'Documents', nameKey: 'quick.documents', segment: 'Documents' },
+    { name: 'Downloads', nameKey: 'quick.downloads', segment: 'Downloads' },
+    { name: 'Projects', nameKey: 'quick.projects', segment: 'Projects' },
+    { name: 'code', nameKey: 'quick.code', segment: 'code' },
+    { name: 'src', nameKey: 'quick.src', segment: 'src' },
   ]
   for (const item of named) {
     const candidate = join(home, item.segment)
     try {
       const info = await stat(candidate)
-      if (info.isDirectory()) rows.push({ name: item.name, path: candidate, hidden: false })
+      if (info.isDirectory()) {
+        rows.push({ name: item.name, nameKey: item.nameKey, path: candidate, hidden: false })
+      }
     } catch {
       // A missing shortcut is not an error; the row simply does not exist.
     }
   }
-  rows.push({ name: IS_WINDOWS ? `${parse(home).root} 盘根目录` : '根目录 /', path: rootOf(home), hidden: false })
+  rows.push(IS_WINDOWS
+    ? {
+      name: `${parse(home).root} drive root`,
+      nameKey: 'quick.driveRoot',
+      nameParams: { drive: parse(home).root },
+      path: rootOf(home),
+      hidden: false,
+    }
+    : { name: 'Root', nameKey: 'quick.root', path: rootOf(home), hidden: false })
   return rows
 }
 
@@ -399,7 +431,7 @@ export async function listDirectories(raw: unknown): Promise<BrowseResult> {
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    return { ok: false, error: 'unreadable', message: `无法读取该目录（${code ?? 'unknown'}）` }
+    return { ok: false, error: 'unreadable', message: `无法读取该目录（${code ?? '未知'}）` }
   }
 
   return {

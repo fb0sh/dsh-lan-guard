@@ -311,6 +311,7 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
         socketWatchdog: options.switches.socketWatchdog(),
         mobileCompat: options.switches.mobileCompat(),
         mobileScrollFix: options.switches.mobileScrollFix(),
+        pwaInstall: options.switches.pwaInstall(),
         mode: options.switches.mode(),
         adminPolicy: options.switches.adminPolicy(),
         adminProtection: options.switches.adminProtection(),
@@ -754,6 +755,7 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
       mobileCompat: () => options.switches.mobileCompat(),
       mobileScrollFix: () => options.switches.mobileScrollFix(),
       socketWatchdog: () => options.switches.socketWatchdog(),
+      pwaInstall: () => options.switches.pwaInstall(),
     },
     logger,
   })

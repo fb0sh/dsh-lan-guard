@@ -6,18 +6,22 @@
  * NOTHING in the type system or the other suites could see it. The cause is a
  * flexbox rule that is easy to reintroduce: a flex item's automatic minimum size
  * resolves to 0 once its overflow is not `visible`, and both rows scroll
- * horizontally — so as soon as the sheet reached its max-height the browser
+ * horizontally — so as soon as the dialog reached its max-height the browser
  * shrank exactly those two rows to nothing while the list kept its floor.
  *
  * The sheet is rendered in a real browser in this repository's manual
  * verification; this test pins the invariants that made it correct so a future
  * edit cannot silently undo them.
+ *
+ * The picker's rules live in `src/client/ui/styles.ts` (the plugin's single
+ * design source), so the extraction below reads that file rather than the
+ * component.
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('../src/client/workspace-flow.ts', import.meta.url), 'utf8')
-const css = /const FLOW_CSS = `\n([\s\S]*?)\n`/.exec(source)?.[1] ?? ''
+const source = readFileSync(new URL('../src/client/ui/styles.ts', import.meta.url), 'utf8')
+const css = /export const FLOW_CSS = `\n([\s\S]*?)\n`\.trim\(\)/.exec(source)?.[1] ?? ''
 
 /** The declaration block of one rule, by exact selector. */
 function rule(selector: string): string {
@@ -38,12 +42,16 @@ describe('picker sheet layout', () => {
     for (const selector of ['.lgp-crumbs,.lgp-quick', '.lgp-head', '.lgp-foot', '.lgp-notice']) {
       expect(rule(selector), `${selector} must not shrink`).toContain('flex:0 0 auto')
     }
+    // The body is the one flexible track; the list is the one flexible row
+    // inside it, and both need min-height:0 for the shrink to reach the list.
+    expect(rule('.lgp-body')).toContain('flex:1 1 auto')
+    expect(rule('.lgp-body')).toContain('min-height:0')
     expect(rule('.lgp-list')).toContain('flex:1 1 auto')
     expect(rule('.lgp-list')).toContain('min-height:0')
   })
 
-  it('clips the sheet instead of letting a child escape its rounded box', () => {
-    expect(rule('.lgp-sheet')).toContain('overflow:hidden')
+  it('clips the dialog instead of letting a child escape its rounded box', () => {
+    expect(rule('.lgp-dialog')).toContain('overflow:hidden')
   })
 
   it('keeps every chip on one line, so a long name cannot be cut in half', () => {

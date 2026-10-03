@@ -21,6 +21,7 @@ import type { WebServerLike } from '../src/settings/routes.ts'
 import { startFakeDsh, type FakeDsh } from './helpers/fake-dsh.ts'
 import { freePort, requestTo } from './helpers/http-client.ts'
 import { tmpDataDir } from './helpers/tmp.ts'
+import { LANGUAGE_MARKER } from '../src/pwa.ts'
 
 let fake: FakeDsh | undefined
 let runtime: LanGuardRuntime | undefined
@@ -331,7 +332,7 @@ describe('apply', () => {
     expect(tapDisposed).toBe(1)
   })
 
-  it('leaves the index untouched only when every index patch is switched off', async () => {
+  it('leaves the index otherwise untouched when every index patch is switched off', async () => {
     fake = await startFakeDsh()
     const port = await freePort()
     const transforms: ((html: string) => string)[] = []
@@ -356,16 +357,22 @@ describe('apply', () => {
       upstreamOrigin: fake.origin,
       tls: { mode: 'off' },
       settingsUnlock: false,
-      // The two mobile patches default ON; the identity assertion below is
-      // about the tap being a no-op when NOTHING is requested.
+      // The other mobile patches default ON; the assertion below is about the
+      // tap adding NOTHING once every switch is off.
       mobileCompat: false,
       socketWatchdog: false,
       mobileScrollFix: false,
+      pwaInstall: false,
       auth: { allowLoopback: true },
     })
 
     const index = '<html><head></head><body>app</body></html>'
-    expect(transforms[0]?.(index)).toBe(index)
+    const out = transforms[0]?.(index) ?? ''
+    // The document-language fix is not a switch: the served shell hard-codes
+    // `lang="en"`, and leaving it wrong is what makes a Chinese phone offer to
+    // translate a Chinese page. Everything else must be absent.
+    expect(out).toContain(LANGUAGE_MARKER)
+    expect(out.replace(/<script><!--dsh-lan-guard:lang-->[\s\S]*?<\/script>/, '')).toBe('<html><head></head><body>app</body></html>')
   })
 
   it('keeps the unlock off while still shipping the mobile patches', async () => {

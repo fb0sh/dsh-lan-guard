@@ -57,6 +57,8 @@ export interface ClientEnvironment {
   hasNativeHost: boolean
 }
 
+import type { Translate } from './i18n.ts'
+
 /** Which interaction this browser should get. */
 export type FlowDecision = 'native' | 'browse'
 
@@ -96,47 +98,52 @@ export interface PickerNotice {
  * Translate a refusal into something actionable.
  *
  * @param code - the `error` field of a management response, or a transport code.
+ * @param t - the picker's translator, so the notice follows the active locale.
  * @returns the title and detail the page shows.
  */
-export function browseErrorNotice(code: string): PickerNotice {
+export function browseErrorNotice(code: string, t: Translate): PickerNotice {
   switch (code) {
     case 'read_only_remote':
       return {
-        title: '远程设备当前只读',
-        detail: '在电脑上打开「设置 → 局域网访问 → 安全认证 → 远程设备管理权限」，选「密码解锁」（或「不锁定」），然后刷新本页。',
+        title: t('notice.readOnly.title'),
+        detail: t('notice.readOnly.detail'),
       }
     case 'admin_required':
       return {
-        title: '需要先解锁管理控制台',
-        detail: '在「设置 → 局域网访问 → 安全认证」输入管理密码解锁，然后回到这里重试。',
+        title: t('notice.adminRequired.title'),
+        detail: t('notice.adminRequired.detail'),
       }
     case 'rate_limited':
-      return { title: '请求过于频繁', detail: '稍等几秒再试。' }
+      return { title: t('notice.rateLimited.title'), detail: t('notice.rateLimited.detail') }
     case 'blocked':
       return {
-        title: '该目录被安全策略禁止',
-        detail: '系统目录与凭据目录（.ssh、.aws、.env 等）不能浏览，也不能作为工作区。',
+        title: t('notice.blocked.title'),
+        detail: t('notice.blocked.detail'),
       }
     case 'not_found':
-      return { title: '目录不存在', detail: '它可能已经被移动或删除，返回上一层再选一次。' }
+      return { title: t('notice.notFound.title'), detail: t('notice.notFound.detail') }
     case 'not_a_directory':
-      return { title: '这不是一个文件夹', detail: '工作区必须是一个目录。' }
+      return { title: t('notice.notADirectory.title'), detail: t('notice.notADirectory.detail') }
     case 'not_absolute':
     case 'invalid_path':
-      return { title: '路径无效', detail: '请使用完整的绝对路径。' }
+      return { title: t('notice.invalidPath.title'), detail: t('notice.invalidPath.detail') }
     case 'unreadable':
-      return { title: '无法读取该目录', detail: '权限不足或磁盘不可用。' }
+      return { title: t('notice.unreadable.title'), detail: t('notice.unreadable.detail') }
     case 'forbidden':
     case 'unauthorized':
-      return { title: '会话已失效', detail: '刷新页面重新登录后再试。' }
+      return { title: t('notice.forbidden.title'), detail: t('notice.forbidden.detail') }
     default:
-      return { title: '无法读取目录', detail: code === '' ? '未知错误。' : code }
+      return { title: t('notice.unknown.title'), detail: code === '' ? t('notice.unknown.detail') : code }
   }
 }
 
 /** One row of a listing, as the page needs it. */
 export interface BrowseRow {
   name: string
+  /** A message key for the name, when the host sent copy rather than a path segment. */
+  nameKey?: string
+  /** Placeholders for {@link nameKey}. */
+  nameParams?: Record<string, string>
   path: string
   hidden: boolean
 }
@@ -221,6 +228,15 @@ export interface FlowInjected {
   pick(): Promise<string | null>
   /** One directory level from the management route. */
   browse(path?: string): Promise<BrowseListingView>
+  /**
+   * The plugin's translator.
+   *
+   * Passed through this surface rather than through the `locale:` slot seat
+   * because the picker is a transient dialog: it cannot be open across a
+   * language switch in any realistic flow, and a stable bound function keeps
+   * the registration options unchanged.
+   */
+  t?: Translate
 }
 
 /**

@@ -11,11 +11,12 @@
  *   works" illusion the spec forbids.
  *
  * The page carries no credential, no token and no state beyond what the URL
- * already exposes. Colours go through the official `--dsw-alias-*` variables
- * with fallbacks, because this page is served on the PROXY origin where the
- * official stylesheet is not loaded.
+ * already exposes. DSH's own stylesheet is NOT loaded on the proxy origin, so
+ * the official palette is inlined in {@link LOGIN_CSS} (read out of DSH
+ * 0.2.0-rc.2's theme) and the markup is styled as the official dialog surface.
  */
 import type { AuthMode } from '../config.ts'
+import { gateTranslate, type GateLocale, type GateTranslate } from './gate-i18n.ts'
 
 /** Which state the login page should render. */
 export type LoginState =
@@ -32,6 +33,14 @@ export interface LoginPageOptions {
   now?: number
   /** Where to go after a successful login (already validated as a local path). */
   next?: string
+  /**
+   * The language this request is served in.
+   *
+   * Resolved by the gate from DSH's own `locale` setting — the one the official
+   * settings page writes — falling back to the visitor's `Accept-Language`.
+   * Defaults to Chinese so a direct call can never render half-translated.
+   */
+  locale?: GateLocale
   /**
    * Whether a first-time device must ALSO name itself after logging in (pairing).
    *
@@ -64,33 +73,37 @@ export function renderPairingPage(options: {
   defaultLabel: string
   ip: string
   error?: 'invalid' | 'csrf'
+  /** The language the gate resolved for this request. */
+  locale?: GateLocale
 }): string {
+  const locale = options.locale ?? 'zh'
+  const t = gateTranslate(locale)
   const notice = options.error === 'csrf'
-    ? '<p class="notice error">请求来源校验未通过，请重新提交。</p>'
+    ? t('pair.csrf')
     : options.error === 'invalid'
-      ? '<p class="notice error">设备名称不能为空。</p>'
+      ? t('pair.invalid')
       : ''
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${locale === 'en' ? 'en' : 'zh-CN'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>确认设备 · DSH 局域网访问</title>
+<title>${escapeHtml(t('pair.title'))} · DSH</title>
 <style>${LOGIN_CSS}</style>
 </head>
 <body>
 <main class="card">
-  <h1>确认这台设备</h1>
-  <p class="sub">给它起个名字，方便你在「已授权设备」里识别、也方便日后单独吊销。</p>
+  <h1>${escapeHtml(t('pair.title'))}</h1>
+  <p class="sub">${escapeHtml(t('pair.sub'))}</p>
   ${notice}
-  <div class="lg-mono-static">来源地址：${escapeHtml(options.ip)}</div>
+  <div class="lg-mono-static">${escapeHtml(t('pair.source', { ip: options.ip }))}</div>
   <form method="post" action="/__dsh_lan_guard__/pair" autocomplete="off">
-    <label for="label">设备名称</label>
+    <label for="label">${escapeHtml(t('pair.label'))}</label>
     <input id="label" name="label" type="text" value="${escapeHtml(options.defaultLabel)}" autofocus required>
-    <button type="submit">确认并进入 DSH</button>
+    <button type="submit">${escapeHtml(t('pair.submit'))}</button>
   </form>
-  <p class="hint">管理员随时可以在设置页吊销这台设备；吊销后本设备需要重新确认。</p>
+  <p class="hint">${escapeHtml(t('pair.hint'))}</p>
 </main>
 </body>
 </html>
@@ -114,56 +127,119 @@ function remainingSeconds(lockedUntilMs: number | undefined, now: number): numbe
 }
 
 const LOGIN_CSS = `
-:root{color-scheme:light dark}
+/*
+ * The gate's own pages, drawn in DSH's design language.
+ *
+ * They are served on the PROXY origin, so DSH's stylesheet is NOT loaded here
+ * and the official \`--dsw-*\` variables do not exist at runtime — unlike the
+ * settings section, which can simply reference them. The palette below is
+ * therefore the official one INLINED: every value is the resolved alias token
+ * read out of DSH 0.2.0-rc.2's own theme (light from \`body\`, dark from
+ * \`body[data-ds-dark-theme]\`), so a phone that has just come through the gate
+ * sees the same surfaces, strokes and type scale as the app behind it.
+ *
+ * The naming stays \`--dsw-*\` on purpose: the local block is what a future DSH
+ * release replaces wholesale, and a renamed local variable would quietly keep
+ * the old colour.
+ */
+:root{color-scheme:light dark;
+  --dsw-alias-bg-base:#fff;
+  --dsw-alias-bg-layer-2:#fff;
+  --dsw-alias-bg-layer-3:#fff;
+  --dsw-alias-bg-module-platform:#f5f6f7;
+  --dsw-alias-label-primary:#0f1115;
+  --dsw-alias-label-secondary:#61666b;
+  --dsw-alias-label-tertiary:#81858c;
+  --dsw-alias-label-primary-foreground:#fff;
+  --dsw-alias-border-l2:#0000001a;
+  --dsw-alias-border-l4:#00000029;
+  --dsw-alias-button-primary-fill:#0f1115;
+  --dsw-alias-button-primary-hover:#43454a;
+  --dsw-alias-state-error-primary:#ec1313;
+  --dsw-alias-state-warn-primary:#f59e0b;
+  --dsw-alias-state-business-primary:#4176e6;
+  --dsw-radius-sm:8px;
+  --dsw-radius-md:12px;
+  --dsw-radius-panel:28px;
+  --dsw-elevation-prominent:0 0 0 .5px #00000029, 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d}
+@media (prefers-color-scheme:dark){:root{
+  --dsw-alias-bg-base:#151517;
+  --dsw-alias-bg-layer-2:#2c2c2e;
+  --dsw-alias-bg-layer-3:#353638;
+  --dsw-alias-bg-module-platform:#353638;
+  --dsw-alias-label-primary:#f9fafb;
+  --dsw-alias-label-secondary:#cfd3d6;
+  --dsw-alias-label-tertiary:#adb2b8;
+  --dsw-alias-label-primary-foreground:#0f1115;
+  --dsw-alias-border-l2:#ffffff1f;
+  --dsw-alias-border-l4:#fff3;
+  --dsw-alias-button-primary-fill:#f9fafb;
+  --dsw-alias-button-primary-hover:#ebeef2;
+  --dsw-alias-state-error-primary:#f25a5a;
+  --dsw-alias-state-warn-primary:#f59e0b;
+  --dsw-alias-state-business-primary:#7aaaff;
+  --dsw-elevation-prominent:0 0 0 .5px #fff3, 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d}}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-  background:var(--dsw-alias-bg-base,#f6f7f9);color:var(--dsw-alias-text-primary,#1f2329);
+  padding:max(24px,env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom));
+  background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
-.card{width:min(400px,calc(100vw - 32px));background:var(--dsw-alias-bg-elevated,#fff);
-  border:1px solid var(--dsw-alias-border-subtle,#e5e6eb);border-radius:14px;padding:24px;
-  box-shadow:0 8px 28px rgba(0,0,0,.06)}
-h1{margin:0 0 6px;font-size:18px}
-.sub{margin:0 0 18px;font-size:13px;color:var(--dsw-alias-text-secondary,#6b7280)}
-label{display:block;font-size:13px;margin:0 0 6px;color:var(--dsw-alias-text-secondary,#6b7280)}
-input[type=password],input[type=text]{width:100%;height:44px;padding:0 12px;font-size:16px;border-radius:10px;
-  border:1px solid var(--dsw-alias-border-subtle,#d0d3d9);background:var(--dsw-alias-bg-base,#fff);
-  color:var(--dsw-alias-text-primary,#1f2329)}
-input[type=password]:focus{outline:2px solid var(--dsw-alias-brand-primary,#4f46e5);outline-offset:1px}
-button{width:100%;height:44px;margin-top:14px;border:0;border-radius:10px;font-size:15px;font-weight:600;
-  color:#fff;background:var(--dsw-alias-brand-primary,#4f46e5);cursor:pointer}
-button:disabled{opacity:.6;cursor:not-allowed}
-.notice{margin:0 0 16px;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.5}
-.notice.error{background:var(--dsw-alias-bg-danger,#fef2f2);color:var(--dsw-alias-text-danger,#b91c1c);
-  border:1px solid var(--dsw-alias-border-danger,#fecaca)}
-.notice.warn{background:var(--dsw-alias-bg-warning,#fffbeb);color:var(--dsw-alias-text-warning,#92400e);
-  border:1px solid var(--dsw-alias-border-warning,#fde68a)}
-.hint{margin:14px 0 0;font-size:12px;line-height:1.6;color:var(--dsw-alias-text-secondary,#6b7280)}
-.lg-mono-static{margin:0 0 16px;padding:10px 12px;border-radius:10px;background:var(--dsw-alias-bg-secondary,#f1f2f4);
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:var(--dsw-alias-text-primary,#1f2329)}
-@media (hover:none) and (pointer:coarse){button,input[type=password]{height:48px}}
+/* The official dialog surface: panel radius on the secondary layer under the
+   prominent elevation (ui-primitives Modal). */
+.card{width:min(420px,100%);background:var(--dsw-alias-bg-layer-2);border-radius:var(--dsw-radius-panel);
+  padding:24px;box-shadow:var(--dsw-elevation-prominent)}
+h1{margin:0 0 6px;font-size:16px;font-weight:500;line-height:24px}
+.sub{margin:0 0 20px;font-size:14px;line-height:22px;color:var(--dsw-alias-label-secondary)}
+label{display:block;font-size:13px;font-weight:500;line-height:1.5;margin:0 0 6px}
+input[type=password],input[type=text]{width:100%;height:36px;padding:0 12px;font:inherit;font-size:14px;
+  border:0.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);
+  background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary)}
+input:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary)}
+button{width:100%;height:36px;margin-top:16px;border:0;border-radius:var(--dsw-radius-md);
+  font:inherit;font-size:14px;font-weight:500;cursor:pointer;
+  background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
+button:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
+button:disabled{opacity:.4;cursor:not-allowed}
+/*
+ * A notice is copy with a semantic ACCENT, not a filled bar: the semantic
+ * colour marks the edge while the text stays on the high-contrast label token.
+ * Measured against DSH 0.2.0-rc.2, semantic-on-its-own-tint is 3.60:1 in the
+ * light palette — below AA for text — while label-primary is 16.04:1.
+ */
+.notice{margin:0 0 16px;padding:2px 0 2px 10px;font-size:13px;line-height:20px;
+  border-left:2px solid var(--dsw-alias-label-tertiary)}
+.notice.error{border-left-color:var(--dsw-alias-state-error-primary)}
+.notice.warn{border-left-color:var(--dsw-alias-state-warn-primary)}
+.hint{margin:16px 0 0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary)}
+.lg-mono-static{margin:0 0 16px;padding:8px 12px;border:0.5px solid var(--dsw-alias-border-l4);
+  border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;
+  color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
+/* Coarse pointers get the official 44px target floor. */
+@media (hover:none) and (pointer:coarse){
+  input[type=password],input[type=text],button{height:44px}
+}
 `.trim()
 
 /** Build the state-specific notice block. */
-function notice(state: LoginState, lockedUntilMs: number | undefined, now: number): string {
+function notice(state: LoginState, lockedUntilMs: number | undefined, now: number, t: GateTranslate): string {
   if (state === 'invalid') {
-    return '<p class="notice error">密码错误，请重试。</p>'
+    return t('notice.invalid')
   }
   if (state === 'locked') {
     const seconds = remainingSeconds(lockedUntilMs, now)
-    return `<p class="notice error">尝试次数过多，该地址已被临时锁定${
-      seconds > 0 ? `，请在约 ${String(seconds)} 秒后重试` : '，请稍后重试'
-    }。</p>`
+    return t('notice.locked', {
+      when: seconds > 0 ? t('notice.lockedWhen', { seconds }) : t('notice.lockedNow'),
+    })
   }
   if (state === 'csrf') {
-    return '<p class="notice error">请求来源校验未通过，请从本页重新登录。</p>'
+    return t('notice.csrf')
   }
   if (state === 'link-inactive') {
-    return '<p class="notice error">这条免密链接无效，或当前「仅密码」模式不使用免密链接。<br>'
-      + '请输入访问密码；若希望链接可用，请在运行本程序的电脑上把验证模式改为「令牌 + 密码」。</p>'
+    return t('notice.linkInactive')
   }
   if (state === 'pending-approval') {
-    return '<p class="notice">⏳ <strong>这台设备正在等待管理员批准。</strong><br>'
-      + '请在运行本程序的电脑上打开设置 → 局域网访问 → 已授权设备，点「批准」后刷新本页即可进入。</p>'
+    return t('notice.pending')
   }
   if (state === 'device-removed') {
     // Reached only for a REVOKED or BLOCKED record. A record that was DELETED no
@@ -172,17 +248,13 @@ function notice(state: LoginState, lockedUntilMs: number | undefined, now: numbe
     // "清除本浏览器的本站数据" advice went with that dead end.
     // "解除拉黑" really does restore the same browser (unblocking keeps the
     // record, so the same cookie works again immediately).
-    return '<p class="notice error"><strong>此设备已被移除访问权限。</strong><br>'
-      + '请联系管理员在「已授权设备」中「解除拉黑」，同一台设备会立即恢复。</p>'
+    return t('notice.removed')
   }
   if (state === 'token-only') {
-    return '<p class="notice warn">当前验证模式为<strong>仅安全 Token</strong>，不接受密码登录。'
-      + '请使用管理员提供的免密链接或二维码。</p>'
+    return t('notice.tokenOnly')
   }
   if (state === 'no-password') {
-    return '<p class="notice warn"><strong>尚未设置访问密码。</strong><br>'
-      + '出于安全考虑，未设置密码时门禁不会放行任何设备。'
-      + '请在桌面 DSH 的「设置 → 局域网访问」中设置访问密码。</p>'
+    return t('notice.noPassword')
   }
   return ''
 }
@@ -194,6 +266,8 @@ function notice(state: LoginState, lockedUntilMs: number | undefined, now: numbe
  * @returns a complete HTML document.
  */
 export function renderLoginPage(options: LoginPageOptions): string {
+  const locale = options.locale ?? 'zh'
+  const t = gateTranslate(locale)
   const now = options.now ?? Date.now()
   // `link-inactive` is deliberately NOT in this list: it only means the LINK is
   // dead, while the password form still works. Disabling it stranded real
@@ -204,37 +278,37 @@ export function renderLoginPage(options: LoginPageOptions): string {
   // Say the second gate out loud BEFORE the password is submitted: the visitor
   // otherwise reads "扫码即登录" and is surprised by the naming page.
   const pairingHint = options.pairingRequired === true && LOGIN_CAPABLE_STATES.includes(options.state)
-    ? '<p class="hint">首次访问：通过后还需要给这台设备起个名字，方便你在「已授权设备」里识别和单独吊销。</p>'
+    ? `<p class="hint">${escapeHtml(t('login.pairingHint'))}</p>`
     : ''
   const modeHint = options.mode === 'password'
-    ? '本设备需要输入访问密码。'
+    ? t('login.mode.password')
     : options.mode === 'token'
-      ? '本设备使用免密链接访问；如已失效，请向管理员索取新的二维码。'
-      : '输入访问密码，或使用管理员提供的免密链接。'
+      ? t('login.mode.token')
+      : t('login.mode.both')
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${locale === 'en' ? 'en' : 'zh-CN'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>需要访问密码 · DSH 局域网访问</title>
+<title>${escapeHtml(t('login.title'))} · DSH</title>
 <style>${LOGIN_CSS}</style>
 </head>
 <body>
 <main class="card">
-  <h1>局域网访问</h1>
+  <h1>${escapeHtml(t('login.title'))}</h1>
   <p class="sub">${escapeHtml(modeHint)}</p>
-  ${notice(options.state, options.lockedUntilMs, now)}
+  ${notice(options.state, options.lockedUntilMs, now, t)}
   ${pairingHint}
   <form method="post" action="/__dsh_lan_guard__/login" autocomplete="off">
     <input type="hidden" name="next" value="${escapeHtml(next)}">
-    <label for="password">访问密码</label>
+    <label for="password">${escapeHtml(t('login.password'))}</label>
     <input id="password" name="password" type="password" autocomplete="current-password"
       autofocus ${blocked ? 'disabled' : ''} required>
-    <button type="submit" ${blocked ? 'disabled' : ''}>进入 DSH</button>
+    <button type="submit" ${blocked ? 'disabled' : ''}>${escapeHtml(t('login.submit'))}</button>
   </form>
-  <p class="hint">此页面由 dsh-lan-guard 提供。密码通过 HTTPS 或局域网传输，请仅在可信网络中访问。</p>
+  <p class="hint">${escapeHtml(t('login.footer'))}</p>
 </main>
 </body>
 </html>

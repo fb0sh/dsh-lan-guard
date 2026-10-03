@@ -41,6 +41,12 @@ export interface PreferenceValues {
   mobileCompat: boolean
   /** Whether the served page carries the narrow-screen scroll correction (default true). */
   mobileScrollFix: boolean
+  /**
+   * Whether the served page registers the installability service worker
+   * (default true). Without it Android refuses "install as an app" and offers
+   * only a shortcut, because Chromium requires a service worker.
+   */
+  pwaInstall: boolean
   /** Whether a new device must name itself once before it is let in. */
   requirePairing: boolean
   /** Whether a new device also needs the operator's approval (F9). */
@@ -54,8 +60,8 @@ export interface PreferenceValues {
 /** The switch keys, in display order. */
 export const PREFERENCE_KEYS = [
   'enabled', 'listenPort', 'listenHost', 'networkInterface', 'settingsUnlock', 'answerHeartbeat', 'socketWatchdog',
-  'mobileCompat', 'mobileScrollFix', 'mode', 'adminPolicy', 'adminProtection', 'allowLoopback', 'requirePairing',
-  'requireApproval',
+  'mobileCompat', 'mobileScrollFix', 'pwaInstall', 'mode', 'adminPolicy', 'adminProtection', 'allowLoopback',
+  'requirePairing', 'requireApproval',
 ] as const
 
 /** One preference key. */
@@ -92,6 +98,7 @@ export function readPreferences(config: {
   socketWatchdog: boolean
   mobileCompat: boolean
   mobileScrollFix: boolean
+  pwaInstall: boolean
   auth: {
     mode: AuthMode
     adminPolicy: AdminPolicy
@@ -111,6 +118,7 @@ export function readPreferences(config: {
     socketWatchdog: config.socketWatchdog,
     mobileCompat: config.mobileCompat,
     mobileScrollFix: config.mobileScrollFix,
+    pwaInstall: config.pwaInstall,
     requirePairing: config.auth.requirePairing,
     requireApproval: config.auth.requireApproval,
     mode: config.auth.mode,
