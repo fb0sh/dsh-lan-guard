@@ -125,3 +125,32 @@ describe('settings page coverage', () => {
     expect(source).not.toContain('lg-card')
   })
 })
+
+describe('README switch lists', () => {
+  /**
+   * The sentence that enumerates what the page can change.
+   *
+   * It silently fell behind twice — `mobileScrollFix` and `pwaInstall` were both
+   * added as preferences without ever being listed, and the English list had no
+   * `mobileScrollFix` at all. A reader cannot detect that: the switch is simply
+   * there and the doc never mentions it. The list is therefore derived from
+   * PREFERENCE_KEYS rather than trusted.
+   */
+  const MARKERS = {
+    '../README.md': 'The non-sensitive switches',
+    '../README.zh.md': '非敏感开关',
+  } as const
+
+  for (const [file, marker] of Object.entries(MARKERS)) {
+    it(`${file} lists every preference the page can change`, () => {
+      const text = readFileSync(new URL(file, import.meta.url), 'utf8')
+      const start = text.indexOf(marker)
+      expect(start, `${file}: marker "${marker}" is gone`).toBeGreaterThan(-1)
+      // The list closes with a parenthesis on the same logical sentence.
+      const line = text.slice(start, text.indexOf(')', start) + 1)
+      const missing = PREFERENCE_KEYS.filter(key =>
+        !line.includes(`\`${key}\``) && !line.includes(`\`auth.${key}\``))
+      expect(missing, `${file} omits: ${missing.join(', ')}`).toEqual([])
+    })
+  }
+})

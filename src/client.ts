@@ -1330,6 +1330,10 @@ function SettingsSection(props: { t?: Translate } = {}): ReactElement {
       portCheck === null ? null : createElement('p', { className: 'lg-hint' }, portCheck),
       createElement('p', { className: 'lg-hint' },
         t('port.hint', { default: DEFAULT_PORT_HINT, max: 10 })),
+      // The port is part of the ORIGIN, and this page can change it while an
+      // installed app is pointed at the old one. Stated here rather than left
+      // to be discovered: the app and the CA trust both break silently.
+      createElement('p', { className: 'lg-hint' }, t('port.originNotice')),
     ),
     field(
       t('nic.label'),

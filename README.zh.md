@@ -83,7 +83,7 @@ dsh plugin --profile web add "link:$(pwd)"
 
 ## 设置
 
-设置项集中在 **设置 → 局域网访问** 的四个 tab 里。非敏感开关（`enabled`、`listenPort`、`listenHost`、`networkInterface`、`settingsUnlock`、`answerHeartbeat`、`socketWatchdog`、`mobileCompat`、`auth.mode`、`auth.adminPolicy`、`auth.adminProtection`、`auth.allowLoopback`、`auth.requirePairing`、`auth.requireApproval`）可直接改；`listenPort` 与 `listenHost` 需重启 dsh 生效；`settingsUnlock` / `socketWatchdog` / `mobileCompat` / `mobileScrollFix` 刷新页面即可生效，`answerHeartbeat` 立即对**已打开**的连接生效；`dataDir` 与 `tls.*` 属启动期字段，需在 profile patch 里改。
+设置项集中在 **设置 → 局域网访问** 的四个 tab 里。非敏感开关（`enabled`、`listenPort`、`listenHost`、`networkInterface`、`settingsUnlock`、`answerHeartbeat`、`socketWatchdog`、`mobileCompat`、`mobileScrollFix`、`pwaInstall`、`auth.mode`、`auth.adminPolicy`、`auth.adminProtection`、`auth.allowLoopback`、`auth.requirePairing`、`auth.requireApproval`）可直接改；`listenPort` 与 `listenHost` 需重启 dsh 生效；`settingsUnlock` / `socketWatchdog` / `mobileCompat` / `mobileScrollFix` 刷新页面即可生效，`answerHeartbeat` 立即对**已打开**的连接生效；`dataDir` 与 `tls.*` 属启动期字段，需在 profile patch 里改。
 
 | 设置项 | 默认 | 作用 |
 | --- | --- | --- |

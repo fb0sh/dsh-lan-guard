@@ -83,7 +83,7 @@ Then **restart DSH once** and open **Settings → 局域网访问**. After that 
 
 ## Settings
 
-Everything lives under **Settings → 局域网访问**, in four tabs. The non-sensitive switches (`enabled`, `listenPort`, `listenHost`, `networkInterface`, `settingsUnlock`, `answerHeartbeat`, `socketWatchdog`, `mobileCompat`, `auth.mode`, `auth.adminPolicy`, `auth.adminProtection`, `auth.allowLoopback`, `auth.requirePairing`, `auth.requireApproval`) are editable directly; `listenPort` and `listenHost` take effect on the next DSH restart; `settingsUnlock`, `socketWatchdog` and `mobileCompat` take effect on the next page load while `answerHeartbeat` also applies to connections that are already open; `dataDir` and `tls.*` are startup fields that need a profile-patch edit.
+Everything lives under **Settings → 局域网访问**, in four tabs. The non-sensitive switches (`enabled`, `listenPort`, `listenHost`, `networkInterface`, `settingsUnlock`, `answerHeartbeat`, `socketWatchdog`, `mobileCompat`, `mobileScrollFix`, `pwaInstall`, `auth.mode`, `auth.adminPolicy`, `auth.adminProtection`, `auth.allowLoopback`, `auth.requirePairing`, `auth.requireApproval`) are editable directly; `listenPort` and `listenHost` take effect on the next DSH restart; `settingsUnlock`, `socketWatchdog`, `mobileCompat`, `mobileScrollFix` and `pwaInstall` take effect on the next page load while `answerHeartbeat` also applies to connections that are already open; `dataDir` and `tls.*` are startup fields that need a profile-patch edit.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
