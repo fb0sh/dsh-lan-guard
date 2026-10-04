@@ -28,10 +28,25 @@
  */
 
 /** Marker attribute naming the injected registration script, for tests and de-duplication. */
-export const PWA_MARKER = '<!--dsh-lan-guard:pwa-->'
+/*
+ * MARKER STYLE IS LOAD-BEARING: these markers sit INSIDE a script element, and
+ * the HTML-comment opener is a legal SINGLE-LINE comment in JavaScript (Annex
+ * B). A marker written that way therefore comments out the rest of the injected
+ * line — which is the whole script, since each is emitted on one line.
+ *
+ * All three patches below shipped with that marker and silently did nothing:
+ * the document-language fix and the service-worker registration never ran
+ * (found 2026-10-04, by noticing that a new patch's side effect never happened
+ * while its siblings' did). The patches that use a JS block comment were
+ * unaffected, which is what hid this for so long.
+ *
+ * tests/pwa-scripts.test.ts now EXECUTES each script and asserts its effect,
+ * instead of grepping for the marker text.
+ */
+export const PWA_MARKER = '/*dsh-lan-guard:pwa*/'
 
 /** Marker attribute naming the injected document-language script. */
-export const LANGUAGE_MARKER = '<!--dsh-lan-guard:lang-->'
+export const LANGUAGE_MARKER = '/*dsh-lan-guard:lang*/'
 
 /**
  * The worker body.
@@ -42,6 +57,78 @@ export const LANGUAGE_MARKER = '<!--dsh-lan-guard:lang-->'
  * the `fetch` handler does nothing: claiming a client cannot change how any
  * request is served.
  */
+/**
+ * The plugin-owned manifest and its icons.
+ *
+ * WHY THIS EXISTS: DSH's own `/manifest.webmanifest` declares a single icon,
+ * `favicon.svg` with `sizes: "any"`. Chrome's documented install criteria
+ * require "a 192px and a 512px icon", and an SVG-only manifest does not satisfy
+ * that on Android — Edge offers only "create a shortcut" and reports "cannot
+ * install this app" (reported 2026-10-04). Everything else about DSH's manifest
+ * already qualifies, so this manifest mirrors it field for field and only
+ * replaces the icon list with real PNGs rasterized from DSH's own favicon.
+ *
+ * It is served by the GATE, so the swap below is applied only on a page that
+ * came through the gate: DSH's own loopback origin keeps DSH's own manifest.
+ */
+/** Idempotency marker for the manifest-link swap. */
+export const PWA_MANIFEST_MARKER = '/*dsh-lan-guard:manifest*/'
+
+/**
+ * The manifest the gate serves.
+ *
+ * Field for field DSH's own, except for `icons`: the two PNGs are what the
+ * install check actually reads, and DSH's SVG is kept as a third entry so a
+ * browser that prefers vector art still gets it.
+ *
+ * @param icons - the gate-owned icon routes to advertise.
+ * @returns the manifest as JSON text.
+ */
+export function pwaManifest(icons: { icon192: string; icon512: string }): string {
+  return JSON.stringify({
+    name: 'DeepSeek Harness',
+    short_name: 'DSH',
+    start_url: './',
+    scope: './',
+    display: 'fullscreen',
+    icons: [
+      { src: icons.icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: icons.icon512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+    ],
+  })
+}
+
+/**
+ * The manifest-link swap.
+ *
+ * Runs on the VISITOR's page, so it can tell which origin served it — the index
+ * tap cannot, because it only ever sees the HTML. Loopback returns early for the
+ * same reason {@link pwaInstallScript} does: that origin is DSH's own, where
+ * this plugin's manifest path does not exist and the swap would break a working
+ * install.
+ *
+ * Deferred to `DOMContentLoaded` because the tap injects at the top of `<head>`,
+ * ahead of the `<link rel="manifest">` it has to find. Installability is decided
+ * after load, so the swap still lands in time.
+ *
+ * @param manifestPath - the gate-owned manifest route to point the link at.
+ * @returns one inline `<script>` element.
+ */
+export function pwaManifestScript(manifestPath: string): string {
+  return `<script>${PWA_MANIFEST_MARKER}(function(){try{`
+    + 'var h=location.hostname;'
+    + 'if(h==="127.0.0.1"||h==="localhost"||h==="[::1]")return;'
+    + `var p=${JSON.stringify(manifestPath)};`
+    + 'var swap=function(){'
+    + `var l=document.querySelector('link[rel="manifest"]');`
+    + 'if(l&&l.getAttribute("href")!==p)l.setAttribute("href",p);'
+    + '};'
+    + 'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",swap);'
+    + 'else swap();'
+    + '}catch(e){}})()</script>'
+  }
+
 export const SERVICE_WORKER_BODY = `/* dsh-lan-guard: installability worker — intentionally empty.
  * Its fetch listener exists so the browser can offer "install as an app"; it
  * never short-circuits a request and never consults a cache, so every request

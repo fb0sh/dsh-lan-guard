@@ -20,6 +20,7 @@ import {
   injectDocumentLanguage,
   injectMobileCompat,
   injectPwaInstall,
+  injectPwaManifest,
   injectMobileScrollFix,
   injectSettingsUnlock,
   injectSocketWatchdog,
@@ -33,11 +34,12 @@ import {
 import {
   documentLanguageScript,
   LANGUAGE_MARKER,
+  PWA_MANIFEST_MARKER,
   PWA_MARKER,
   pwaInstallScript,
   SERVICE_WORKER_BODY,
 } from '../src/pwa.ts'
-import { SERVICE_WORKER_PATH } from '../src/auth/gate.ts'
+import { PWA_MANIFEST_PATH, SERVICE_WORKER_PATH } from '../src/auth/gate.ts'
 import type { LanGuardLogger } from '../src/log.ts'
 
 /** A logger that records what it was told. */
@@ -601,6 +603,19 @@ describe('installability worker registration', () => {
     expect(pwaInstallScript(SERVICE_WORKER_PATH)).toContain('h==="localhost"')
     // A missing API (plain HTTP is not a secure context) must be a no-op.
     expect(pwaInstallScript(SERVICE_WORKER_PATH)).toContain('"serviceWorker" in navigator')
+  })
+
+  it('points the served page at the gate manifest, not DSH\'s own', () => {
+    // DSH's manifest declares one SVG with `sizes: "any"`; Chrome's documented
+    // install criteria want a 192px and a 512px icon, which is why an Android
+    // browser offered only "create a shortcut" (reported 2026-10-04).
+    const out = injectPwaManifest('<html><head><link rel="manifest" href="./manifest.webmanifest"></head></html>')
+    expect(out).toContain(PWA_MANIFEST_MARKER)
+    expect(out).toContain(PWA_MANIFEST_PATH)
+    // The swap must be a no-op on DSH's own origin, where this route does not exist.
+    expect(out).toContain('"127.0.0.1"')
+    expect(out).toContain('DOMContentLoaded')
+    expect(injectPwaManifest(out)).toBe(out)
   })
 
   it('ships a worker that adds a fetch handler and nothing else', () => {

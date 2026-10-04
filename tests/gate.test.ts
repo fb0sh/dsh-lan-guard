@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { startLanGuard, type LanGuardRuntime } from '../src/index.ts'
 import { GATE_PREFIX, SERVICE_WORKER_PATH } from '../src/auth/gate.ts'
 import { renderPairingPage } from '../src/auth/login-page.ts'
+import { PWA_ICON_192_PATH, PWA_ICON_512_PATH, PWA_MANIFEST_PATH } from '../src/auth/gate.ts'
 import type { LanGuardLogger } from '../src/log.ts'
 import { startFakeDsh, type FakeDsh } from './helpers/fake-dsh.ts'
 import { requestTo, type RawResponse } from './helpers/http-client.ts'
@@ -308,6 +309,81 @@ describe('gate page language', () => {
     expect(html).toContain('Source address: 192.168.1.9')
     expect(html).not.toContain('确认')
     expect(html).toContain('<html lang="en">')
+  })
+})
+
+
+describe('installability assets', () => {
+  // Chrome's documented install criteria: "icons - must include a 192px and a
+  // 512px icon". DSH's own manifest declares a single SVG with `sizes: "any"`,
+  // which is why an Android browser offered only "create a shortcut" and
+  // reported "cannot install this app" (reported 2026-10-04). The gate serves a
+  // manifest that mirrors DSH's and replaces the icon list.
+  it('serves a manifest whose icons meet the documented criteria', async () => {
+    const { port } = await harness()
+    const response = await requestTo(port, { path: PWA_MANIFEST_PATH })
+    expect(response.status).toBe(200)
+    expect(response.headers['content-type']).toContain('application/manifest+json')
+    const manifest = JSON.parse(response.body.toString()) as {
+      name: string
+      short_name: string
+      start_url: string
+      display: string
+      icons: { src: string; sizes: string; type: string }[]
+    }
+    // Everything DSH already satisfied is mirrored, so the installed app is
+    // still "DSH" rather than a renamed copy of it.
+    expect(manifest.name).toBe('DeepSeek Harness')
+    expect(manifest.short_name).toBe('DSH')
+    expect(manifest.start_url).toBe('./')
+    expect(manifest.display).toBe('fullscreen')
+    const sizes = manifest.icons.map(icon => icon.sizes)
+    expect(sizes).toContain('192x192')
+    expect(sizes).toContain('512x512')
+    expect(manifest.icons.filter(icon => icon.type === 'image/png')).toHaveLength(2)
+  })
+
+  it('serves both icons as real PNGs of the size the manifest claims', async () => {
+    const { port } = await harness()
+    for (const [path, size] of [[PWA_ICON_192_PATH, 192], [PWA_ICON_512_PATH, 512]] as const) {
+      const icon = await requestTo(port, { path })
+      expect(icon.status, path).toBe(200)
+      expect(icon.headers['content-type']).toBe('image/png')
+      // PNG signature, then the IHDR dimensions at a fixed offset: proof these
+      // are the declared size and not a placeholder the check would reject.
+      expect(icon.body.subarray(0, 8))
+        .toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      expect(icon.body.readUInt32BE(16)).toBe(size)
+      expect(icon.body.readUInt32BE(20)).toBe(size)
+    }
+  })
+
+  it('serves them without a session, so the install check never sees a 401', async () => {
+    // The browser fetches these before any sign-in; a gate refusal reads as an
+    // unexplained "cannot install this app".
+    const { port } = await harness()
+    for (const path of [PWA_MANIFEST_PATH, PWA_ICON_192_PATH, PWA_ICON_512_PATH]) {
+      const response = await requestTo(port, { path })
+      expect(response.status, path).toBe(200)
+    }
+  })
+
+  it('forwards DSH\'s own manifest and favicon without a session', async () => {
+    // The browser fetches these with credentials omitted. Gating them made the
+    // manifest fetch fail with 401, so the install check saw no manifest at all
+    // — which is why DSH's own unproxied origin could install and this could
+    // not (reported 2026-10-04).
+    const { port } = await harness()
+    for (const path of ['/manifest.webmanifest', '/favicon.svg']) {
+      const response = await requestTo(port, { path })
+      expect(response.status, path).toBe(200)
+    }
+  })
+
+  it('refuses a write method on them', async () => {
+    const { port } = await harness()
+    const response = await requestTo(port, { path: PWA_MANIFEST_PATH, method: 'POST' })
+    expect(response.status).toBe(405)
   })
 })
 

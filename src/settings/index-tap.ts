@@ -36,8 +36,10 @@ import {
   LANGUAGE_MARKER,
   PWA_MARKER,
   pwaInstallScript,
+  pwaManifestScript,
+  PWA_MANIFEST_MARKER,
 } from '../pwa.ts'
-import { SERVICE_WORKER_PATH } from '../auth/gate.ts'
+import { PWA_MANIFEST_PATH, SERVICE_WORKER_PATH } from '../auth/gate.ts'
 
 /** The page global DSH's connection client reads its transport facts from. */
 export const TRANSPORT_GLOBAL = '__DSH_TRANSPORT__'
@@ -438,6 +440,22 @@ export function injectSocketWatchdog(html: string): string {
  * @param html - the index body as DSH rendered it.
  * @returns the body with the registration inserted.
  */
+/**
+ * Point the served page at the gate's own manifest.
+ *
+ * Separate from {@link injectPwaInstall} because the two fail independently:
+ * the worker is an older-browser nicety, while the manifest is what the install
+ * check actually reads. The swap is a no-op on DSH's own origin — see
+ * `../pwa.ts`.
+ *
+ * @param html - the served index document.
+ * @returns the document with the swap script injected.
+ */
+export function injectPwaManifest(html: string): string {
+  if (html.includes(PWA_MANIFEST_MARKER)) return html
+  return insertAfterHead(html, pwaManifestScript(PWA_MANIFEST_PATH))
+}
+
 export function injectPwaInstall(html: string): string {
   if (html.includes(PWA_MARKER)) return html
   return insertAfterHead(html, pwaInstallScript(SERVICE_WORKER_PATH))
@@ -507,7 +525,10 @@ export function registerIndexPatches(options: RegisterIndexPatchesOptions): (() 
     if (options.switches.mobileScrollFix()) out = injectMobileScrollFix(out)
     if (options.switches.socketWatchdog()) out = injectSocketWatchdog(out)
     if (options.switches.settingsUnlock()) out = injectSettingsUnlock(out)
-    if (options.switches.pwaInstall()) out = injectPwaInstall(out)
+    if (options.switches.pwaInstall()) {
+      out = injectPwaInstall(out)
+      out = injectPwaManifest(out)
+    }
     // Applied LAST because every insert lands immediately after `<head>`: the
     // last one written is the first one parsed, and the language has to be
     // right before anything else the page does.

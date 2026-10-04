@@ -80,3 +80,4 @@ describe('gate page design', () => {
     expect(rule).not.toContain('color:var(--dsw-alias-state-')
   })
 })
+

@@ -372,7 +372,8 @@ describe('apply', () => {
     // `lang="en"`, and leaving it wrong is what makes a Chinese phone offer to
     // translate a Chinese page. Everything else must be absent.
     expect(out).toContain(LANGUAGE_MARKER)
-    expect(out.replace(/<script><!--dsh-lan-guard:lang-->[\s\S]*?<\/script>/, '')).toBe('<html><head></head><body>app</body></html>')
+    expect(out.replace(new RegExp(`<script>${LANGUAGE_MARKER.replace(/[/*]/g, '\\$&')}[\\s\\S]*?<\\/script>`), ''))
+      .toBe('<html><head></head><body>app</body></html>')
   })
 
   it('keeps the unlock off while still shipping the mobile patches', async () => {
