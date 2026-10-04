@@ -328,6 +328,7 @@ describe('installability assets', () => {
       name: string
       short_name: string
       start_url: string
+      scope: string
       display: string
       icons: { src: string; sizes: string; type: string }[]
     }
@@ -335,7 +336,11 @@ describe('installability assets', () => {
     // still "DSH" rather than a renamed copy of it.
     expect(manifest.name).toBe('DeepSeek Harness')
     expect(manifest.short_name).toBe('DSH')
-    expect(manifest.start_url).toBe('./')
+    // ABSOLUTE on purpose: this manifest lives at a deep gate path, and a
+    // relative start_url resolves against the manifest's own URL — `"./"` sent
+    // the installed app to `/__dsh_lan_guard__/`, the gate's 404.
+    expect(manifest.start_url).toBe('/')
+    expect(manifest.scope).toBe('/')
     expect(manifest.display).toBe('fullscreen')
     const sizes = manifest.icons.map(icon => icon.sizes)
     expect(sizes).toContain('192x192')

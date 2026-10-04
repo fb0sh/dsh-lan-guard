@@ -77,9 +77,15 @@ export const PWA_MANIFEST_MARKER = '/*dsh-lan-guard:manifest*/'
 /**
  * The manifest the gate serves.
  *
- * Field for field DSH's own, except for `icons`: the two PNGs are what the
- * install check actually reads, and DSH's SVG is kept as a third entry so a
- * browser that prefers vector art still gets it.
+ * DSH's fields, with two deliberate differences:
+ *
+ * 1. `icons` carries the two PNGs the install check actually reads; DSH's SVG is
+ *    kept as a third entry so a browser that prefers vector art still gets it.
+ * 2. `start_url` and `scope` are ABSOLUTE. DSH writes `"./"`, which is correct
+ *    only because its manifest sits at the origin root. This one sits at
+ *    `/__dsh_lan_guard__/manifest.webmanifest`, and a relative value resolves
+ *    against the MANIFEST's URL — so `"./"` launched the installed app at
+ *    `/__dsh_lan_guard__/`, which is the gate's 404 (reported 2026-10-04).
  *
  * @param icons - the gate-owned icon routes to advertise.
  * @returns the manifest as JSON text.
@@ -88,8 +94,8 @@ export function pwaManifest(icons: { icon192: string; icon512: string }): string
   return JSON.stringify({
     name: 'DeepSeek Harness',
     short_name: 'DSH',
-    start_url: './',
-    scope: './',
+    start_url: '/',
+    scope: '/',
     display: 'fullscreen',
     icons: [
       { src: icons.icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
