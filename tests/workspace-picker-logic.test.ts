@@ -173,6 +173,7 @@ describe('registerDirectoryFlow', () => {
     registerDirectoryFlow(fake.slots, component, {
       pick: async () => null,
       browse: async () => ({ path: '/', crumbs: [], quick: [], entries: [], truncated: false }),
+      create: async () => '/',
     })
     expect(fake.seats).toEqual([HERO_FLOW, SIDEBAR_FLOW])
     expect(fake.registered.map(entry => entry.options.name)).toEqual([HERO_FLOW, SIDEBAR_FLOW])
@@ -194,12 +195,16 @@ describe('registerDirectoryFlow', () => {
       entries: [],
       truncated: false,
     })
-    registerDirectoryFlow(fake.slots, {}, { pick, browse })
+    const create = async (): Promise<string> => '/'
+    registerDirectoryFlow(fake.slots, {}, { pick, browse, create })
     const injected = fake.registered[0]?.options.inject
     expect(typeof injected).toBe('function')
-    const props = (injected as () => { pick: unknown; browse: unknown })()
+    const props = (injected as () => { pick: unknown; browse: unknown; create: unknown })()
     expect(props.pick).toBe(pick)
     expect(props.browse).toBe(browse)
+    // The create verb rides the same surface, so the occupant can always reach
+    // it without a second lookup.
+    expect(props.create).toBe(create)
   })
 })
 

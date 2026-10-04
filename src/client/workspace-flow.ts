@@ -58,6 +58,16 @@ interface FlowProps {
   pick(): Promise<string | null>
   /** One directory level from the management route. */
   browse(path?: string): Promise<BrowseListingView>
+  /**
+   * Create one child folder and return its absolute path.
+   *
+   * Mirrors the official occupant's `createDirectory(path, name)` contract, but
+   * through this plugin's own route: DSH's `directoryPicker` verbs need the
+   * `browse` capability, and a host whose web server binds loopback resolves
+   * the picker to `native` — so `list` and `createDirectory` are both refused
+   * there, which is why the browse verb is plugin-owned too.
+   */
+  create(path: string, name: string): Promise<string>
   /** The plugin's translator, forwarded from the registration. */
   t?: Translate
 }
@@ -118,6 +128,41 @@ async function fetchListing(path?: string): Promise<BrowseListingView> {
   return readBrowseResponse(response.status, body)
 }
 
+/**
+ * Create one folder through the management route.
+ *
+ * The POST body carries the parent and the single-segment name; the host applies
+ * the same fence and authority checks as a listing, so this cannot reach
+ * anywhere browsing cannot.
+ *
+ * @param path - the absolute parent directory.
+ * @param name - the folder name as typed.
+ * @returns the created absolute path.
+ */
+async function createFolder(path: string, name: string): Promise<string> {
+  const response = await fetch(BROWSE_PATH, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ path, name }),
+  })
+  let body: unknown = null
+  try {
+    body = await response.json()
+  } catch {
+    body = null
+  }
+  if (response.status === 200) {
+    const record = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+    if (record.ok === true && typeof record.path === 'string') return record.path
+  }
+  const record = typeof body === 'object' && body !== null ? body as Record<string, unknown> : {}
+  const code = typeof record.error === 'string' && record.error !== ''
+    ? record.error
+    : `http_${String(response.status)}`
+  throw new BrowseRequestError(code, code)
+}
+
 /** Look a client service up without requiring it. */
 function optionalService(ctx: DirectoryFlowContext, name: string): unknown {
   try {
@@ -157,7 +202,7 @@ function officialPick(ctx: DirectoryFlowContext): (() => Promise<string | null>)
  * @returns the sheet while a remote pick is in flight, otherwise nothing.
  */
 export function DirectoryFlow(props: FlowProps): ReactElement | null {
-  const { open, pick, browse } = props
+  const { open, pick, browse, create } = props
   // The plugin's translator rides the injected surface; a host without the
   // locale service leaves it undefined and the Chinese stand-in applies.
   const t: Translate = props.t ?? standaloneTranslate()
@@ -173,6 +218,11 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
   const [unlockPassword, setUnlockPassword] = useState('')
   const [unlockBusy, setUnlockBusy] = useState(false)
   const [unlockError, setUnlockError] = useState<string | null>(null)
+  // The nested create dialog. `null` means closed; a string is the draft name,
+  // so an empty draft is distinguishable from "not creating".
+  const [folderDraft, setFolderDraft] = useState<string | null>(null)
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   /** The path a retry should re-list (the last one shown, or the home directory). */
   const lastPath = useRef<string | undefined>(undefined)
 
@@ -204,6 +254,38 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
       },
     )
   }, [browse])
+
+  /**
+   * Create the drafted folder, then land on its parent with it selected.
+   *
+   * The draft is sent VERBATIM: only an all-whitespace name is rejected, because
+   * trimming would create a different sibling than the one typed. Mirrors the
+   * official browser's `confirmCreate`.
+   */
+  const confirmCreate = useCallback((): void => {
+    if (listing === null || folderDraft === null || creatingFolder) return
+    const name = folderDraft
+    if (name.trim() === '') return
+    const target = listing.path
+    setCreatingFolder(true)
+    setCreateError(null)
+    void create(target, name).then(
+      () => {
+        if (!alive.current) return
+        setCreatingFolder(false)
+        setFolderDraft(null)
+        // Land like the official flow: the target becomes the listed level and
+        // the new folder appears in it.
+        load(target)
+      },
+      (reason: unknown) => {
+        if (!alive.current) return
+        setCreatingFolder(false)
+        const notice = browseErrorNotice(codeOf(reason), t)
+        setCreateError(`${notice.title}。${notice.detail}`)
+      },
+    )
+  }, [create, creatingFolder, folderDraft, listing, load, t])
 
   useEffect(() => {
     if (!open) {
@@ -443,6 +525,61 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
           ? createElement('p', { className: 'lgp-hint' }, t('picker.truncated'))
           : null,
       ),
+      // The nested create dialog, mirroring the official browser: a title, the
+      // target it names, one input (Enter creates, Escape closes), an inline
+      // error, and Cancel/Create. Rendered as its own layer so the level
+      // underneath stays visible but inert.
+      folderDraft === null ? null : createElement(
+        'div',
+        { className: 'lgp-create-layer' },
+        createElement(
+          'div',
+          { className: 'lgp-create', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('picker.newFolder') },
+          createElement('h3', { className: 'lgp-title' }, t('picker.newFolder')),
+          createElement('p', { className: 'lgp-hint' },
+            t('picker.createIn', { name: listing?.path ?? '' })),
+          createElement('input', {
+            className: 'lgp-input',
+            type: 'text',
+            value: folderDraft,
+            placeholder: t('picker.untitledFolder'),
+            'aria-label': t('picker.folderName'),
+            autoFocus: true,
+            disabled: creatingFolder,
+            onChange: (event: { target: { value: string } }) => {
+              setFolderDraft(event.target.value)
+              setCreateError(null)
+            },
+            onKeyDown: (event: { key: string; preventDefault: () => void; stopPropagation: () => void }) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                confirmCreate()
+              }
+              if (event.key === 'Escape') {
+                event.stopPropagation()
+                if (!creatingFolder) setFolderDraft(null)
+              }
+            },
+          }),
+          createError === null
+            ? null
+            : createElement('p', { className: 'lgp-hint lgp-error', role: 'alert' }, createError),
+          createElement(
+            'div',
+            { className: 'lgp-create-actions' },
+            createElement(Button, {
+              variant: 'outline',
+              disabled: creatingFolder,
+              onClick: () => { setFolderDraft(null) },
+            }, t('common.cancel')),
+            createElement(Button, {
+              variant: 'primary',
+              disabled: creatingFolder || folderDraft.trim() === '',
+              onClick: confirmCreate,
+            }, creatingFolder ? t('picker.creating') : t('picker.create')),
+          ),
+        ),
+      ),
       createElement(
         'div',
         { className: 'lgp-foot' },
@@ -450,6 +587,15 @@ export function DirectoryFlow(props: FlowProps): ReactElement | null {
         createElement(
           'div',
           { className: 'lgp-actions' },
+          createElement(Button, {
+            variant: 'outline',
+            icon: createElement(Icons.plus, { size: 14 }),
+            disabled: listing === null || loading,
+            onClick: () => {
+              setFolderDraft('')
+              setCreateError(null)
+            },
+          }, t('picker.newFolder')),
           createElement(Button, { variant: 'outline', onClick: cancel }, t('common.cancel')),
           createElement(Button, {
             variant: 'primary',
@@ -477,5 +623,7 @@ export function applyDirectoryFlow(ctx: DirectoryFlowContext, i18n: { t: Transla
     }
     return official()
   }
-  registerDirectoryFlow(ctx.slots, DirectoryFlow, { pick, browse: fetchListing, t: i18n.t })
+  registerDirectoryFlow(ctx.slots, DirectoryFlow, {
+    pick, browse: fetchListing, create: createFolder, t: i18n.t,
+  })
 }

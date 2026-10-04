@@ -127,6 +127,10 @@ export function browseErrorNotice(code: string, t: Translate): PickerNotice {
     case 'not_absolute':
     case 'invalid_path':
       return { title: t('notice.invalidPath.title'), detail: t('notice.invalidPath.detail') }
+    case 'exists':
+      return { title: t('notice.exists.title'), detail: t('notice.exists.detail') }
+    case 'create_failed':
+      return { title: t('notice.createFailed.title'), detail: t('notice.createFailed.detail') }
     case 'unreadable':
       return { title: t('notice.unreadable.title'), detail: t('notice.unreadable.detail') }
     case 'forbidden':
@@ -228,6 +232,15 @@ export interface FlowInjected {
   pick(): Promise<string | null>
   /** One directory level from the management route. */
   browse(path?: string): Promise<BrowseListingView>
+  /**
+   * Create one child folder and return its absolute path.
+   *
+   * The same verb the official occupant receives, but served by this plugin's
+   * own route: DSH's `directoryPicker.createDirectory` needs the `browse`
+   * capability, and a host whose web server binds loopback resolves the picker
+   * to `native` — where both `list` and `createDirectory` are refused.
+   */
+  create(path: string, name: string): Promise<string>
   /**
    * The plugin's translator.
    *

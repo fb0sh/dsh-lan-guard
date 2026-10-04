@@ -5,13 +5,15 @@
  * a REAL filesystem: symlinks are created, sensitive directories are created,
  * and the assertions are about what a remote device could actually reach.
  */
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   MAX_ENTRIES,
   blockedPrefixOf,
+  createDirectory,
   crumbsOf,
   isFullyQualified,
   isSensitiveName,
@@ -184,4 +186,78 @@ describe('listDirectories', () => {
     expect(listing.entries).toHaveLength(MAX_ENTRIES)
     expect(listing.truncated).toBe(true)
   }, 30_000)
+})
+
+describe('createDirectory', () => {
+  let scratch = ''
+
+  beforeEach(async () => {
+    scratch = await mkdtemp(join(tmpdir(), 'dsh-lg-create-'))
+  })
+  afterEach(async () => {
+    await rm(scratch, { recursive: true, force: true })
+  })
+
+  it('creates one child folder and returns its absolute path', async () => {
+    const created = await createDirectory(scratch, 'my-project')
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.path).toBe(join(scratch, 'my-project'))
+    // Really on disk, and really a directory.
+    expect((await stat(created.path)).isDirectory()).toBe(true)
+  })
+
+  it('sends the name verbatim rather than trimmed', async () => {
+    // The official browser makes the same choice: trimming would create a
+    // different sibling than the one typed.
+    const created = await createDirectory(scratch, ' spaced ')
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.path).toBe(join(scratch, ' spaced '))
+  })
+
+  it('refuses a blank, dotted or multi-segment name', async () => {
+    for (const name of ['', '   ', '.', '..', 'a/b', 'a\\b']) {
+      const created = await createDirectory(scratch, name)
+      expect(created.ok, JSON.stringify(name)).toBe(false)
+      if (created.ok) continue
+      expect(['invalid_path', 'blocked'], JSON.stringify(name)).toContain(created.error)
+    }
+  })
+
+  it('refuses a sensitive name, so the fence covers the child too', async () => {
+    // `.ssh` is no more acceptable as a NEW folder than as a browsed one:
+    // creating it would put a credential directory inside a workspace.
+    const created = await createDirectory(scratch, '.ssh')
+    expect(created.ok).toBe(false)
+    if (created.ok) return
+    expect(created.error).toBe('blocked')
+    await expect(stat(join(scratch, '.ssh'))).rejects.toThrow()
+  })
+
+  it('refuses a parent the fence rejects, and creates nothing', async () => {
+    const created = await createDirectory(join(scratch, 'does-not-exist'), 'child')
+    expect(created.ok).toBe(false)
+    if (created.ok) return
+    expect(created.error).toBe('not_found')
+  })
+
+  it('reports an existing folder as a distinct code, never as a failure', async () => {
+    await mkdir(join(scratch, 'taken'))
+    const created = await createDirectory(scratch, 'taken')
+    expect(created.ok).toBe(false)
+    if (created.ok) return
+    // A distinct code is what lets the page say "pick another name" instead of
+    // an opaque refusal.
+    expect(created.error).toBe('exists')
+  })
+
+  it('is not recursive: a missing parent is a refusal, not a silent tree', async () => {
+    const created = await createDirectory(scratch, 'a')
+    expect(created.ok).toBe(true)
+    const nested = await createDirectory(join(scratch, 'a', 'b'), 'c')
+    expect(nested.ok).toBe(false)
+    if (nested.ok) return
+    expect(nested.error).toBe('not_found')
+  })
 })

@@ -37,7 +37,7 @@
  *   too, so a symlink cannot escape the fence;
  * - one listing never returns more than {@link MAX_ENTRIES} rows.
  */
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path'
 
@@ -110,6 +110,10 @@ export type BrowseErrorCode =
   | 'not_a_directory'
   | 'unreadable'
   | 'blocked'
+  /** A folder of that name already exists. */
+  | 'exists'
+  /** `mkdir` refused for a reason that is not "already there". */
+  | 'create_failed'
 
 /** A refused listing. */
 export interface BrowseFailure {
@@ -442,4 +446,80 @@ export async function listDirectories(raw: unknown): Promise<BrowseResult> {
     entries,
     truncated,
   }
+}
+
+/** A successfully created folder. */
+export interface CreateListing {
+  ok: true
+  /** The absolute path of the folder that now exists. */
+  path: string
+}
+
+/** The create outcome. */
+export type CreateResult = CreateListing | BrowseFailure
+
+/**
+ * Validate one new folder name.
+ *
+ * Mirrors the host controller's own schema (`createDirectoryRequestSchema`):
+ * a single non-blank path segment. The name is returned VERBATIM rather than
+ * trimmed, because trimming would create a different sibling than the one the
+ * operator typed — the official browser makes the same choice.
+ *
+ * @param raw - the name as typed.
+ * @returns the name to create, or the refusal.
+ */
+export function resolveNewFolderName(raw: unknown): { ok: true; name: string } | BrowseFailure {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return { ok: false, error: 'invalid_path', message: '文件夹名称不能为空' }
+  }
+  if (raw.includes('\0') || raw.includes('/') || raw.includes('\\')) {
+    return { ok: false, error: 'invalid_path', message: '文件夹名称不能包含路径分隔符' }
+  }
+  if (raw === '.' || raw === '..') {
+    return { ok: false, error: 'invalid_path', message: '文件夹名称无效' }
+  }
+  // The fence applies to the CHILD as well: `.ssh` is no more acceptable as a
+  // new folder than it is as a browsed one, and creating it would put a
+  // credential directory inside a workspace.
+  if (isSensitiveName(raw)) {
+    return { ok: false, error: 'blocked', message: `禁止访问敏感目录「${raw}」` }
+  }
+  return { ok: true, name: raw }
+}
+
+/**
+ * Create one child folder inside a browsable parent.
+ *
+ * The parent goes through exactly the same fence as a listing, and the child is
+ * re-checked against it, so the create verb cannot reach anywhere the browse
+ * verb cannot. `mkdir` is deliberately NOT recursive: a missing parent is a
+ * refusal, not a silent tree.
+ *
+ * @param rawParent - the absolute parent directory.
+ * @param rawName - the single-segment folder name.
+ * @returns the created absolute path, or the refusal.
+ */
+export async function createDirectory(rawParent: unknown, rawName: unknown): Promise<CreateResult> {
+  const name = resolveNewFolderName(rawName)
+  if (!name.ok) return name
+  const parent = await resolveBrowsablePath(rawParent)
+  if (!parent.ok) return parent
+
+  const child = join(parent.path, name.name)
+  const directBlock = blockedPrefixOf(child)
+  if (directBlock !== undefined) {
+    return { ok: false, error: 'blocked', message: `禁止访问系统目录「${directBlock}」` }
+  }
+
+  try {
+    await mkdir(child)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EEXIST') {
+      return { ok: false, error: 'exists', message: '同名文件夹已存在' }
+    }
+    return { ok: false, error: 'create_failed', message: `无法创建文件夹（${code ?? '未知'}）` }
+  }
+  return { ok: true, path: child }
 }

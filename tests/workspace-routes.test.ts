@@ -6,7 +6,8 @@
  * fence and the runaway guard. It runs on a real loopback server so the visitor
  * marker and the admin cookie behave exactly as they do in production.
  */
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -256,5 +257,74 @@ describe('GET /plugins/dsh-lan-guard/workspaces', () => {
       if (last === 429) break
     }
     expect(last).toBe(429)
+  })
+})
+
+/** POST one create request. */
+async function createIn(
+  port: number,
+  path: string,
+  name: string,
+  headers: Record<string, string> = {},
+): Promise<RawResponse> {
+  return await requestTo(port, {
+    method: 'POST',
+    path: BROWSE_PATH,
+    headers: { 'content-type': 'application/json', host: `127.0.0.1:${String(port)}`, ...headers },
+    body: JSON.stringify({ path, name }),
+  })
+}
+
+describe('creating a folder through the management route', () => {
+  it('creates one child folder and answers its absolute path', async () => {
+    const { port } = await harness()
+    const target = await mkdtemp(join(tmpdir(), 'dsh-lg-route-'))
+    try {
+      const response = await createIn(port, target, 'new-project')
+      expect(response.status).toBe(200)
+      const body = JSON.parse(response.body.toString()) as { ok: boolean; path: string }
+      expect(body.ok).toBe(true)
+      expect(body.path).toBe(join(target, 'new-project'))
+      expect((await stat(body.path)).isDirectory()).toBe(true)
+    } finally {
+      await rm(target, { recursive: true, force: true })
+    }
+  })
+
+  it('answers 409 for a name that is taken, not 500', async () => {
+    // A distinct status is what lets the page say "pick another name" rather
+    // than reporting an opaque failure.
+    const { port } = await harness()
+    const target = await mkdtemp(join(tmpdir(), 'dsh-lg-route-'))
+    try {
+      await mkdir(join(target, 'taken'))
+      const response = await createIn(port, target, 'taken')
+      expect(response.status).toBe(409)
+      expect(JSON.parse(response.body.toString()).error).toBe('exists')
+    } finally {
+      await rm(target, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a sensitive name with 403 and creates nothing', async () => {
+    const { port } = await harness()
+    const target = await mkdtemp(join(tmpdir(), 'dsh-lg-route-'))
+    try {
+      const response = await createIn(port, target, '.ssh')
+      expect(response.status).toBe(403)
+      expect(JSON.parse(response.body.toString()).error).toBe('blocked')
+      await expect(stat(join(target, '.ssh'))).rejects.toThrow()
+    } finally {
+      await rm(target, { recursive: true, force: true })
+    }
+  })
+
+  it('applies the same authority rule as browsing', async () => {
+    // Creating is a WRITE, so a read-only remote session must be refused
+    // exactly where a listing is.
+    const { port } = await harness('local_only')
+    const response = await createIn(port, scratch, 'x', REMOTE)
+    expect(response.status).toBe(403)
+    expect(JSON.parse(response.body.toString()).error).toBe('read_only_remote')
   })
 })

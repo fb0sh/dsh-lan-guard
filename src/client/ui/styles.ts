@@ -363,7 +363,20 @@ export const FLOW_CSS = `
   font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);
   overflow-x:auto;white-space:nowrap;scrollbar-width:none}
 .lgp-path::-webkit-scrollbar{display:none}
-.lgp-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.lgp-actions{display:flex;align-items:center;gap:8px}
+/* The primary action stays right; the New folder button leads the row. */
+.lgp-actions>button:last-child{margin-left:auto}
+.lgp-create-layer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:var(--dsw-alias-bg-mask-1);backdrop-filter:blur(var(--dsw-mask-blur,4px));
+  border-radius:inherit;z-index:1}
+.lgp-create{display:flex;flex-direction:column;gap:12px;width:100%;max-width:360px;
+  box-sizing:border-box;padding:20px;border-radius:var(--dsw-radius-xl);
+  background:var(--dsw-alias-bg-layer-1);border:0.5px solid var(--dsw-alias-border-l4);
+  box-shadow:var(--dsw-shadow-lv3,none)}
+.lgp-create .lgp-title{margin:0}
+.lgp-create .lgp-hint{margin:0}
+.lgp-create-actions{display:flex;justify-content:flex-end;gap:8px}
+.lgp-error{color:var(--dsw-alias-state-error-primary)}
 .lgp-busy{align-self:center;margin:auto;padding:12px 16px;border-radius:var(--dsw-radius-lg);
   background:var(--dsw-alias-toast-bg);color:var(--dsw-alias-toast-label);
   font-size:14px;line-height:22px;box-shadow:var(--dsw-shadow-lv3)}

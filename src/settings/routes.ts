@@ -29,7 +29,7 @@ import type { AuthManager } from '../auth/manager.ts'
 import { buildClearedCookie, isLoopbackAddress, passesCsrfCheck, ADMIN_COOKIE } from '../auth/manager.ts'
 import { VISITOR_HEADER } from '../headers.ts'
 import type { AccessInfo } from '../qrcode.ts'
-import { listDirectories } from '../workspace/browse.ts'
+import { createDirectory, listDirectories } from '../workspace/browse.ts'
 import type { DeviceRecord } from '../store/secrets.ts'
 import type { DeviceStatus } from '../store/secrets.ts'
 import type { UpdateStatus } from '../update-check.ts'
@@ -674,6 +674,21 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
     return bucket.used > BROWSE_RATE_LIMIT
   }
 
+  /**
+   * The HTTP status one browse refusal maps to.
+   *
+   * Shared by the list and create verbs so a code can never mean 400 on one and
+   * 403 on the other — the page discriminates on the code, but a proxy or a log
+   * reader discriminates on the status.
+   */
+  const browseStatus = (error: string): number =>
+    error === 'blocked' ? 403
+      : error === 'not_found' ? 404
+        : error === 'unreadable' ? 500
+          : error === 'exists' ? 409
+            : error === 'create_failed' ? 500
+              : 400
+
   const handleWorkspaces = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (refusedByFence(req, res)) return
     if (isRemoteReadOnly(req)) {
@@ -691,15 +706,33 @@ export function registerManagementRoutes(options: ManagementRoutesOptions): () =
       return
     }
     const url = new URL(req.url ?? '/', 'http://dsh-lan-guard.invalid')
+
+    // POST creates one child folder; GET lists a level. Both go through the
+    // fence and the authority checks above, so the create verb cannot reach
+    // anywhere the browse verb cannot.
+    if (isStateChanging(req.method)) {
+      let body: { path?: unknown; name?: unknown }
+      try {
+        body = (await readJsonBody(req)) as typeof body
+      } catch {
+        sendJson(res, 400, { ok: false, error: 'invalid_path' })
+        return
+      }
+      const created = await createDirectory(body.path, body.name)
+      if (created.ok) {
+        sendJson(res, 200, created)
+        return
+      }
+      sendJson(res, browseStatus(created.error), created)
+      return
+    }
+
     const result = await listDirectories(url.searchParams.get('path'))
     if (result.ok) {
       sendJson(res, 200, result)
       return
     }
-    const status = result.error === 'blocked'
-      ? 403
-      : result.error === 'not_found' ? 404 : result.error === 'unreadable' ? 500 : 400
-    sendJson(res, status, result)
+    sendJson(res, browseStatus(result.error), result)
   }
 
   disposers.push(options.webServer.register({
